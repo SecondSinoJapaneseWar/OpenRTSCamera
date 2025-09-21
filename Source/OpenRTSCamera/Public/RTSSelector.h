@@ -2,7 +2,7 @@
 
 #pragma once
 
-#include "CoreMinimal.h"
+#include <CoreMinimal.h>
 #include "InputAction.h"
 #include "InputMappingContext.h"
 #include "RTSHUD.h"

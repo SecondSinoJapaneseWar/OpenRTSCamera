@@ -2,7 +2,7 @@
 
 #pragma once
 
-#include "CoreMinimal.h"
+#include <CoreMinimal.h>
 #include "GameFramework/HUD.h"
 #include "RTSHUD.generated.h"
 
@@ -13,7 +13,6 @@ class OPENRTSCAMERA_API ARTSHUD : public AHUD
 
 public:
 	ARTSHUD();
-
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Selection Box")
 	FLinearColor SelectionBoxColor;
 

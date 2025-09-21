@@ -2,7 +2,7 @@
 
 #pragma once
 
-#include "CoreMinimal.h"
+#include <CoreMinimal.h>
 #include "InputMappingContext.h"
 #include "Camera/CameraComponent.h"
 #include "Components/ActorComponent.h"
@@ -66,7 +66,9 @@ public:
 	float StartingZAngle;
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "RTSCamera")
-	float MoveSpeed;
+	float MaxMoveSpeed;
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "RTSCamera")
+	float MinMoveSpeed;
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "RTSCamera")
 	float RotateSpeed;
 	
@@ -104,13 +106,8 @@ public:
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "RTSCamera - Edge Scroll Settings")
 	bool EnableEdgeScrolling;
-	UPROPERTY(
-		BlueprintReadWrite,
-		EditAnywhere,
-		Category = "RTSCamera - Edge Scroll Settings",
-		meta=(EditCondition="EnableEdgeScrolling")
-	)
-	float EdgeScrollSpeed;
+
+
 	UPROPERTY(
 		BlueprintReadWrite,
 		EditAnywhere,
@@ -199,4 +196,6 @@ private:
 	FVector2D DragStartLocation;
 	UPROPERTY()
 	TArray<FMoveCameraCommand> MoveCameraCommands;
+	UPROPERTY()
+	float NowMoveSpeed;
 };

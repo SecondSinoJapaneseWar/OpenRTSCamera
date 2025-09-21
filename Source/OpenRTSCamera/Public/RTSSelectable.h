@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "RTSSelectable.generated.h"
 
 UCLASS(Blueprintable, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
