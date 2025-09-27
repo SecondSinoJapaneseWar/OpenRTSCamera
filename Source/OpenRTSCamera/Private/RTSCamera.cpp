@@ -259,7 +259,7 @@ void URTSCamera::CollectComponentDependencyReferences()
 
 void URTSCamera::ConfigureSpringArm()
 {
-	this->DesiredZoomLength = this->MaximumZoomLength;
+	this->DesiredZoomLength = this->MinimumZoomLength;
 	this->SpringArm->TargetArmLength = this->DesiredZoomLength;
 	this->SpringArm->bDoCollisionTest = false;
 	this->SpringArm->bEnableCameraLag = this->EnableCameraLag;
