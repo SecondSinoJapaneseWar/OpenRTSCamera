@@ -163,26 +163,30 @@ int32 URTSCameraMinimapWidget::NativePaint(
 		return maxLayerId;
 	}
 
-	/// 从相机缓存中检索投影点并建立线条路径。此处的开销仅存在于重绘帧。
-	TArray<FVector2D> viewportDrawPoints;
+	/// 战术兼容性调整：虽然静态数组更直接，但由于 Slate 的 MakeLines API 严格要求 TArray 类型容器，
+	/// 此处采用预分配空间的 TArray 以平衡性能与接口规范。
+	TArray<FVector2D> drawPoints;
+	drawPoints.Reserve(5);
+
 	for (int32 i = 0; i < 4; ++i)
 	{
 		const FVector& worldPt = this->cachedRTSCamera->minimapFrustumPoints[i];
-		FVector2D widgetPt = this->ConvertWorldToWidgetLocal(FVector2D(worldPt.X, worldPt.Y), geometrySize);
-		viewportDrawPoints.Add(widgetPt);
+		drawPoints.Add(this->ConvertWorldToWidgetLocal(FVector2D(worldPt.X, worldPt.Y), geometrySize));
 	}
 
-	if (viewportDrawPoints.Num() > 0)
+	if (drawPoints.Num() > 0)
 	{
-		viewportDrawPoints.Add(viewportDrawPoints[0]);
+		/// 彻底消除断言崩溃：显式拷贝首个元素至栈变量。
+		/// UE 5.6 严禁直接 Add 容器内部的元素地址，以防扩容时发生非法访问。
+		const FVector2D closedPoint = drawPoints[0];
+		drawPoints.Add(closedPoint);
 	}
 
-	/// 在指定图层上生成绘制指令
 	FSlateDrawElement::MakeLines(
 		OutDrawElements,
 		LayerId + 1,
 		AllottedGeometry.ToPaintGeometry(),
-		viewportDrawPoints,
+		drawPoints,
 		ESlateDrawEffect::None,
 		FLinearColor::White,
 		true,
