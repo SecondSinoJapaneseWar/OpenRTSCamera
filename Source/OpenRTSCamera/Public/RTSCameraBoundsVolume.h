@@ -11,5 +11,9 @@ class OPENRTSCAMERA_API ARTSCameraBoundsVolume : public ACameraBlockingVolume
 {
 	GENERATED_BODY()
 
+public:
 	ARTSCameraBoundsVolume();
+
+protected:
+	virtual void BeginPlay() override;
 };

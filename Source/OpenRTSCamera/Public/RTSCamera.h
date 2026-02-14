@@ -25,6 +25,11 @@ struct FMoveCameraCommand
 	float Scale = 0;
 };
 
+/**
+ * @brief       RTS 相机组件，负责处理相机的移动、旋转、缩放以及视野计算。
+ * 
+ * 该组件集成了平滑缩放、边缘滚动、目标跟随等功能，并能实时计算相机在地面的视野框点。
+ **/
 UCLASS(Blueprintable, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class OPENRTSCAMERA_API URTSCamera : public UActorComponent
 {
@@ -46,10 +51,18 @@ public:
 	void UnFollowTarget();
 
 	UFUNCTION(BlueprintCallable, Category = "RTSCamera")
-	void SetActiveCamera() const;
+	void SetActiveCamera();
 	
+	/**
+	 * @brief       将相机瞬间移动到指定位置
+	 * 
+	 * @param       参数名称: Position                      数据类型:        FVector
+	 **/
 	UFUNCTION(BlueprintCallable, Category = "RTSCamera")
-	void JumpTo(FVector Position) const;
+	void JumpTo(FVector Position);
+
+	UFUNCTION(BlueprintPure, Category = "RTSCamera")
+	AActor* GetBoundaryVolume() const { return BoundaryVolume; }
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "RTSCamera - Zoom Settings")
 	float MinimumZoomLength;
@@ -147,16 +160,27 @@ protected:
 	void RequestMoveCamera(float X, float Y, float Scale);
 	void ApplyMoveCameraCommands();
 
+	/** @brief 相机所属的 Actor 引用 */
 	UPROPERTY()
-	AActor* Owner;
+	AActor* CameraOwner;
+
+	/** @brief 根组件场景引用，用于控制相机在世界中的平移和旋转 */
 	UPROPERTY()
-	USceneComponent* Root;
+	USceneComponent* RootComponent;
+
+	/** @brief 相机组件引用，提供 FOV 等光学参数 */
 	UPROPERTY()
-	UCameraComponent* Camera;
+	UCameraComponent* CameraComponent;
+
+	/** @brief 弹簧臂组件引用，用于控制相机的距离（臂长）和俯角 */
 	UPROPERTY()
-	USpringArmComponent* SpringArm;
+	USpringArmComponent* SpringArmComponent;
+
+	/** @brief 玩家控制器引用，用于处理输入和视图设置 */
 	UPROPERTY()
-	APlayerController* PlayerController;
+	APlayerController* RTSPlayerController;
+
+	/** @brief 相机移动边界体积，用于限制相机活动范围 */
 	UPROPERTY()
 	AActor* BoundaryVolume;
 	UPROPERTY()
@@ -165,22 +189,23 @@ protected:
 private:
 	void CollectComponentDependencyReferences();
 	void ConfigureSpringArm();
+
 	void TryToFindBoundaryVolumeReference();
-	void ConditionallyEnableEdgeScrolling() const;
-	void CheckForEnhancedInputComponent() const;
-	void BindInputMappingContext() const;
+	void ConditionallyEnableEdgeScrolling();
+	void CheckForEnhancedInputComponent();
+	void BindInputMappingContext();
 	void BindInputActions();
 
-	void ConditionallyPerformEdgeScrolling() const;
-	void EdgeScrollLeft() const;
-	void EdgeScrollRight() const;
-	void EdgeScrollUp() const;
-	void EdgeScrollDown() const;
+	void ConditionallyPerformEdgeScrolling();
+	void EdgeScrollLeft();
+	void EdgeScrollRight();
+	void EdgeScrollUp();
+	void EdgeScrollDown();
 
-	void FollowTargetIfSet() const;
-	void SmoothTargetArmLengthToDesiredZoom() const;
+	void FollowTargetIfSet();
+	void SmoothTargetArmLengthToDesiredZoom();
 	void ConditionallyKeepCameraAtDesiredZoomAboveGround();
-	void ConditionallyApplyCameraBounds() const;
+	void ConditionallyApplyCameraBounds();
 
 	UPROPERTY()
 	FName CameraBlockingVolumeTag;
@@ -194,8 +219,24 @@ private:
 	bool IsDragging;
 	UPROPERTY()
 	FVector2D DragStartLocation;
+	/** @brief 相机移动指令队列 */
 	UPROPERTY()
 	TArray<FMoveCameraCommand> MoveCameraCommands;
+
+	/** @brief 当前移动速度 */
 	UPROPERTY()
-	float NowMoveSpeed;
+	float CurrentMovementSpeed;
+
+public:
+	/**
+	 * @brief       计算并存储相机在地平面的四个视野投影点
+	 **/
+	UPROPERTY(BlueprintReadOnly, Category = "RTSCamera|Minimap")
+	TArray<FVector> MinimapFrustumPoints;
+
+	/**
+	 * @brief       强制更新视野框坐标。内部计算优先使用 DesiredZoomLength 以实现意图同步。
+	 **/
+	UFUNCTION(BlueprintCallable, Category = "RTSCamera|Minimap")
+	void UpdateMinimapFrustum();
 };

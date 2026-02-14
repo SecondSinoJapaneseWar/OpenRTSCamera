@@ -11,3 +11,5 @@ public:
 	virtual void StartupModule() override;
 	virtual void ShutdownModule() override;
 };
+
+DECLARE_LOG_CATEGORY_EXTERN(LogOpenRTSCamera, Log, All);
