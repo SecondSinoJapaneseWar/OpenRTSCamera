@@ -13,631 +13,554 @@
 
 URTSCamera::URTSCamera()
 {
-	/// 开启组件更新并设置默认相机策略参数
+	/// 设置组件基本生存期属性
 	PrimaryComponentTick.bCanEverTick = true;
-	this->CameraBlockingVolumeTag = FName("OpenRTSCamera#CameraBounds");
-	this->CollisionChannel = ECC_WorldStatic;
-	this->DragExtent = 0.6f;
-	this->DistanceFromEdgeThreshold = 0.1f;
-	this->EnableCameraLag = true;
-	this->EnableCameraRotationLag = true;
-	this->EnableDynamicCameraHeight = true;
-	this->EnableEdgeScrolling = true;
-	this->FindGroundTraceLength = 100000;
-	this->MaximumZoomLength = 5000;
-	this->MinimumZoomLength = 500;
-	this->MaxMoveSpeed = 1024.0f;
-	this->MinMoveSpeed = 128.0f;
-	this->CurrentMovementSpeed = this->MinMoveSpeed; 
-	this->RotateSpeed = 45;
-	this->StartingYAngle = -45.0f;
-	this->StartingZAngle = 0;
-	this->ZoomCatchupSpeed = 4;
-	this->ZoomSpeed = -200;
+	this->cameraBlockingVolumeTag = FName("OpenRTSCamera#CameraBounds");
+	this->collisionChannel = ECC_WorldStatic;
+	this->dragExtent = 0.6f;
+	this->distanceFromEdgeThreshold = 0.1f;
+	this->enableCameraLag = true;
+	this->enableCameraRotationLag = true;
+	this->enableDynamicCameraHeight = true;
+	this->enableEdgeScrolling = true;
+	this->findGroundTraceLength = 100000;
+	this->maximumZoomLength = 5000;
+	this->minimumZoomLength = 500;
+	this->maxMovementSpeed = 1024.0f;
+	this->minMovementSpeed = 128.0f;
+	this->currentMovementSpeed = this->minMovementSpeed; 
+	this->rotationSpeed = 45;
+	this->startingPitchAngle = -45.0f;
+	this->startingYawAngle = 0;
+	this->zoomCatchupSpeed = 4;
+	this->zoomSpeed = -200;
 
-	/// 加载并绑定 Enhanced Input 相关资源
-	static ConstructorHelpers::FObjectFinder<UInputAction> MoveCameraXAxisFinder(TEXT("/OpenRTSCamera/Inputs/MoveCameraXAxis"));
-	static ConstructorHelpers::FObjectFinder<UInputAction> MoveCameraYAxisFinder(TEXT("/OpenRTSCamera/Inputs/MoveCameraYAxis"));
-	static ConstructorHelpers::FObjectFinder<UInputAction> RotateCameraAxisFinder(TEXT("/OpenRTSCamera/Inputs/RotateCameraAxis"));
-	static ConstructorHelpers::FObjectFinder<UInputAction> TurnCameraLeftFinder(TEXT("/OpenRTSCamera/Inputs/TurnCameraLeft"));
-	static ConstructorHelpers::FObjectFinder<UInputAction> TurnCameraRightFinder(TEXT("/OpenRTSCamera/Inputs/TurnCameraRight"));
-	static ConstructorHelpers::FObjectFinder<UInputAction> ZoomCameraFinder(TEXT("/OpenRTSCamera/Inputs/ZoomCamera"));
-	static ConstructorHelpers::FObjectFinder<UInputAction> DragCameraFinder(TEXT("/OpenRTSCamera/Inputs/DragCamera"));
-	static ConstructorHelpers::FObjectFinder<UInputMappingContext> InputMappingContextFinder(TEXT("/OpenRTSCamera/Inputs/OpenRTSCameraInputs"));
+	/// 载入并关联输入资产
+	static ConstructorHelpers::FObjectFinder<UInputAction> xMoveActionFinder(TEXT("/OpenRTSCamera/Inputs/MoveCameraXAxis"));
+	static ConstructorHelpers::FObjectFinder<UInputAction> yMoveActionFinder(TEXT("/OpenRTSCamera/Inputs/MoveCameraYAxis"));
+	static ConstructorHelpers::FObjectFinder<UInputAction> rotateActionFinder(TEXT("/OpenRTSCamera/Inputs/RotateCameraAxis"));
+	static ConstructorHelpers::FObjectFinder<UInputAction> leftTurnActionFinder(TEXT("/OpenRTSCamera/Inputs/TurnCameraLeft"));
+	static ConstructorHelpers::FObjectFinder<UInputAction> rightTurnActionFinder(TEXT("/OpenRTSCamera/Inputs/TurnCameraRight"));
+	static ConstructorHelpers::FObjectFinder<UInputAction> zoomActionFinder(TEXT("/OpenRTSCamera/Inputs/ZoomCamera"));
+	static ConstructorHelpers::FObjectFinder<UInputAction> dragActionFinder(TEXT("/OpenRTSCamera/Inputs/DragCamera"));
+	static ConstructorHelpers::FObjectFinder<UInputMappingContext> contextFinder(TEXT("/OpenRTSCamera/Inputs/OpenRTSCameraInputs"));
 
-	this->MoveCameraXAxis = MoveCameraXAxisFinder.Object;
-	this->MoveCameraYAxis = MoveCameraYAxisFinder.Object;
-	this->RotateCameraAxis = RotateCameraAxisFinder.Object;
-	this->TurnCameraLeft = TurnCameraLeftFinder.Object;
-	this->TurnCameraRight = TurnCameraRightFinder.Object;
-	this->DragCamera = DragCameraFinder.Object;
-	this->ZoomCamera = ZoomCameraFinder.Object;
-	this->InputMappingContext = InputMappingContextFinder.Object;
+	this->moveCameraXAxisAction = xMoveActionFinder.Object;
+	this->moveCameraYAxisAction = yMoveActionFinder.Object;
+	this->rotateCameraAxisAction = rotateActionFinder.Object;
+	this->turnCameraLeftAction = leftTurnActionFinder.Object;
+	this->turnCameraRightAction = rightTurnActionFinder.Object;
+	this->dragCameraAction = dragActionFinder.Object;
+	this->zoomCameraAction = zoomActionFinder.Object;
+	this->inputMappingContext = contextFinder.Object;
 }
 
 void URTSCamera::BeginPlay()
 {
 	Super::BeginPlay();
 
-	const auto NetMode = this->GetNetMode();
-	if (NetMode != NM_DedicatedServer)
+	const auto netMode = this->GetNetMode();
+	if (netMode != NM_DedicatedServer)
 	{
-		/// 初始化依赖组件、配置弹簧臂并寻找地图边界
-		this->CollectComponentDependencyReferences();
-		this->ConfigureSpringArm();
-		this->TryToFindBoundaryVolumeReference();
-		this->ConditionallyEnableEdgeScrolling();
-		this->CheckForEnhancedInputComponent();
-		this->BindInputMappingContext();
-		this->BindInputActions();
+		/// 初始化依赖架构，建立输入映射链条
+		this->resolveComponentDependencyPointers();
+		this->setupInitialSpringArmState();
+		this->locateMapBoundaryVolumeByTag();
+		this->configureInputModeForEdgeScrolling();
+		this->validateEnhancedInputAvailability();
+		this->registerInputMappingContext();
+		this->bindActionCallbacks();
 	}
 }
 
 void URTSCamera::TickComponent(
-	const float DeltaTime,
-	const ELevelTick TickType,
+	float DeltaTime,
+	ELevelTick TickType,
 	FActorComponentTickFunction* ThisTickFunction
 )
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-	const auto NetMode = this->GetNetMode();
+	const auto netMode = this->GetNetMode();
 	
-	/// 仅在非专用服务器且当前相机为活跃视图时执行状态更新 (移动、缩放、边界检查等)
-	if (NetMode != NM_DedicatedServer && this->RTSPlayerController->GetViewTarget() == this->CameraOwner)
+	/// 仅在大客户端中处理相机位置插值与状态同步
+	if (netMode != NM_DedicatedServer && this->realTimeStrategyPlayerController->GetViewTarget() == this->cameraOwner)
 	{
-		this->DeltaSeconds = DeltaTime;
-		this->ApplyMoveCameraCommands();
-		this->ConditionallyPerformEdgeScrolling();
-		this->ConditionallyKeepCameraAtDesiredZoomAboveGround();
-		this->SmoothTargetArmLengthToDesiredZoom();
-		this->FollowTargetIfSet();
-		this->ConditionallyApplyCameraBounds();
+		this->deltaSeconds = DeltaTime;
+		this->applyAccumulatedMovementCommands();
+		this->executeEdgeScrollingEvaluation();
+		this->rectifyRootHeightFromTerrain();
+		this->handleTargetArmLengthInterpolation();
+		this->updateFollowPositionIfTargetActive();
+		this->enforceCameraMovementBounds();
 	}
 }
-void URTSCamera::FollowTarget(AActor* Target)
+
+void URTSCamera::followTarget(AActor* target)
 {
-	this->CameraFollowTarget = Target;
+	/// 设置物理跟随标记，相机将进入逐帧对齐模式
+	this->activeCameraFollowTarget = target;
 }
 
-void URTSCamera::UnFollowTarget()
+void URTSCamera::unFollowTarget()
 {
-	this->CameraFollowTarget = nullptr;
+	/// 解除当前的相机跟随关系
+	this->activeCameraFollowTarget = nullptr;
 }
 
-void URTSCamera::OnZoomCamera(const FInputActionValue& Value)
+void URTSCamera::onZoomCameraActionTriggered(const FInputActionValue& value)
 {
-	/// 更新意图缩放距离
-	this->DesiredZoomLength = FMath::Clamp(
-		this->DesiredZoomLength + Value.Get<float>() * this->ZoomSpeed,
-		this->MinimumZoomLength,
-		this->MaximumZoomLength
+	/// 更新意图缩放距离并通过该参数联动调整移动阻尼感
+	this->desiredZoomLength = FMath::Clamp(
+		this->desiredZoomLength + value.Get<float>() * this->zoomSpeed,
+		this->minimumZoomLength,
+		this->maximumZoomLength
 	);
 
-	/// 计算缩放比例并动态调整移动感官速度
-	float Alpha = (this->DesiredZoomLength - this->MinimumZoomLength) / (this->MaximumZoomLength - this->MinimumZoomLength);
-	this->CurrentMovementSpeed = FMath::Lerp(this->MinMoveSpeed, this->MaxMoveSpeed, Alpha);
+	float speedAlpha = (this->desiredZoomLength - this->minimumZoomLength) / (this->maximumZoomLength - this->minimumZoomLength);
+	this->currentMovementSpeed = FMath::Lerp(this->minMovementSpeed, this->maxMovementSpeed, speedAlpha);
 
-	/// 基于意图高度即时刷新小地图视野框
-	this->UpdateMinimapFrustum();
+	/// 缩放意图发生的瞬间即时投射視野框，确保 UI 的战略响应无延迟
+	this->updateMinimapFrustum();
 }
 
-void URTSCamera::OnRotateCamera(const FInputActionValue& Value)
+void URTSCamera::onRotateCameraActionTriggered(const FInputActionValue& value)
 {
-	/// 获取当前根组件旋转并应用水平旋转增量
-	const auto WorldRotation = this->RootComponent->GetComponentRotation();
-	this->RootComponent->SetWorldRotation(
+	/// 处理水平偏航角输入并更新世界变换
+	const auto actorRotation = this->rootComponent->GetComponentRotation();
+	this->rootComponent->SetWorldRotation(
 		FRotator::MakeFromEuler(
 			FVector(
-				WorldRotation.Euler().X,
-				WorldRotation.Euler().Y,
-				WorldRotation.Euler().Z + Value.Get<float>()
+				actorRotation.Euler().X,
+				actorRotation.Euler().Y,
+				actorRotation.Euler().Z + value.Get<float>()
 			)
 		)
 	);
-	this->UpdateMinimapFrustum();
+	this->updateMinimapFrustum();
 }
 
-void URTSCamera::OnTurnCameraLeft(const FInputActionValue&)
+void URTSCamera::onTurnCameraLeftActionTriggered(const FInputActionValue&)
 {
-	/// 向左平滑旋转相机
-	const auto WorldRotation = this->RootComponent->GetRelativeRotation();
-	this->RootComponent->SetRelativeRotation(
+	/// 向左执行定量的步进式偏转
+	const auto relativeRot = this->rootComponent->GetRelativeRotation();
+	this->rootComponent->SetRelativeRotation(
 		FRotator::MakeFromEuler(
 			FVector(
-				WorldRotation.Euler().X,
-				WorldRotation.Euler().Y,
-				WorldRotation.Euler().Z - this->RotateSpeed
+				relativeRot.Euler().X,
+				relativeRot.Euler().Y,
+				relativeRot.Euler().Z - this->rotationSpeed
 			)
 		)
 	);
-	this->UpdateMinimapFrustum();
+	this->updateMinimapFrustum();
 }
 
-void URTSCamera::OnTurnCameraRight(const FInputActionValue&)
+void URTSCamera::onTurnCameraRightActionTriggered(const FInputActionValue&)
 {
-	/// 向右平滑旋转相机
-	const auto WorldRotation = this->RootComponent->GetRelativeRotation();
-	this->RootComponent->SetRelativeRotation(
+	/// 向右执行定量的步进式偏转
+	const auto relativeRot = this->rootComponent->GetRelativeRotation();
+	this->rootComponent->SetRelativeRotation(
 		FRotator::MakeFromEuler(
 			FVector(
-				WorldRotation.Euler().X,
-				WorldRotation.Euler().Y,
-				WorldRotation.Euler().Z + this->RotateSpeed
+				relativeRot.Euler().X,
+				relativeRot.Euler().Y,
+				relativeRot.Euler().Z + this->rotationSpeed
 			)
 		)
 	);
-	this->UpdateMinimapFrustum();
+	this->updateMinimapFrustum();
 }
 
-void URTSCamera::OnMoveCameraYAxis(const FInputActionValue& Value)
+void URTSCamera::onMoveCameraYAxisActionTriggered(const FInputActionValue& value)
 {
-	/// 根据相机当前朝向请求垂直（Y轴）移动指令
-	this->RequestMoveCamera(
-		this->SpringArmComponent->GetForwardVector().X,
-		this->SpringArmComponent->GetForwardVector().Y,
-		Value.Get<float>()
+	/// 处理纵向平移请求
+	this->requestCameraMovement(
+		this->springArmComponent->GetForwardVector().X,
+		this->springArmComponent->GetForwardVector().Y,
+		value.Get<float>()
 	);
 }
 
-void URTSCamera::OnMoveCameraXAxis(const FInputActionValue& Value)
+void URTSCamera::onMoveCameraXAxisActionTriggered(const FInputActionValue& value)
 {
-	/// 根据相机当前朝向请求水平（X轴）移动指令
-	this->RequestMoveCamera(
-		this->SpringArmComponent->GetRightVector().X,
-		this->SpringArmComponent->GetRightVector().Y,
-		Value.Get<float>()
+	/// 处理横向平移请求
+	this->requestCameraMovement(
+		this->springArmComponent->GetRightVector().X,
+		this->springArmComponent->GetRightVector().Y,
+		value.Get<float>()
 	);
 }
 
-void URTSCamera::OnDragCamera(const FInputActionValue& Value)
+void URTSCamera::onDragCameraActionTriggered(const FInputActionValue& value)
 {
-	/// 开始拖拽：记录初始鼠标位置
-	if (!this->IsDragging && Value.Get<bool>())
+	/// 记录拖拽起始状态
+	if (!this->isDragging && value.Get<bool>())
 	{
-		this->IsDragging = true;
-		this->DragStartLocation = UWidgetLayoutLibrary::GetMousePositionOnViewport(this->GetWorld());
+		this->isDragging = true;
+		this->dragInteractionInitialLocation = UWidgetLayoutLibrary::GetMousePositionOnViewport(this->GetWorld());
 	}
 
-	/// 拖拽中：计算位置增量并映射到移动指令
-	else if (this->IsDragging && Value.Get<bool>())
+	/// 在激活期间计算平滑增量并转换为运动指令
+	else if (this->isDragging && value.Get<bool>())
 	{
-		const auto MousePosition = UWidgetLayoutLibrary::GetMousePositionOnViewport(this->GetWorld());
-		auto DragExtents = UWidgetLayoutLibrary::GetViewportWidgetGeometry(this->GetWorld()).GetLocalSize();
-		DragExtents *= DragExtent;
+		const auto mousePosition = UWidgetLayoutLibrary::GetMousePositionOnViewport(this->GetWorld());
+		auto viewportSizeExtent = UWidgetLayoutLibrary::GetViewportWidgetGeometry(this->GetWorld()).GetLocalSize();
+		viewportSizeExtent *= dragExtent;
 
-		auto Delta = MousePosition - this->DragStartLocation;
-		Delta.X = FMath::Clamp(Delta.X, -DragExtents.X, DragExtents.X) / DragExtents.X;
-		Delta.Y = FMath::Clamp(Delta.Y, -DragExtents.Y, DragExtents.Y) / DragExtents.Y;
+		auto dragDelta = mousePosition - this->dragInteractionInitialLocation;
+		dragDelta.X = FMath::Clamp(dragDelta.X, -viewportSizeExtent.X, viewportSizeExtent.X) / viewportSizeExtent.X;
+		dragDelta.Y = FMath::Clamp(dragDelta.Y, -viewportSizeExtent.Y, viewportSizeExtent.Y) / viewportSizeExtent.Y;
 
-		this->RequestMoveCamera(
-			this->SpringArmComponent->GetRightVector().X,
-			this->SpringArmComponent->GetRightVector().Y,
-			Delta.X
+		this->requestCameraMovement(
+			this->springArmComponent->GetRightVector().X,
+			this->springArmComponent->GetRightVector().Y,
+			dragDelta.X
 		);
 
-		this->RequestMoveCamera(
-			this->SpringArmComponent->GetForwardVector().X,
-			this->SpringArmComponent->GetForwardVector().Y,
-			Delta.Y * -1
+		this->requestCameraMovement(
+			this->springArmComponent->GetForwardVector().X,
+			this->springArmComponent->GetForwardVector().Y,
+			dragDelta.Y * -1
 		);
 	}
 
-	/// 停止拖拽
-	else if (this->IsDragging && !Value.Get<bool>())
+	/// 清理拖拽标记
+	else if (this->isDragging && !value.Get<bool>())
 	{
-		this->IsDragging = false;
+		this->isDragging = false;
 	}
 }
 
-void URTSCamera::RequestMoveCamera(const float X, const float Y, const float Scale)
+void URTSCamera::requestCameraMovement(const float x, const float y, const float scale)
 {
-	FMoveCameraCommand MoveCameraCommand;
-	MoveCameraCommand.X = X;
-	MoveCameraCommand.Y = Y;
-	MoveCameraCommand.Scale = Scale;
-	MoveCameraCommands.Push(MoveCameraCommand);
+	/// 将运动请求压入队列，供 Tick 阶段统一消化
+	FMoveCameraCommand movementCmd;
+	movementCmd.x = x;
+	movementCmd.y = y;
+	movementCmd.scale = scale;
+	this->pendingMovementCommands.Push(movementCmd);
 }
 
-void URTSCamera::ApplyMoveCameraCommands()
+void URTSCamera::applyAccumulatedMovementCommands()
 {
-	/// 遍历执行积压的移动指令，应用当前速度并完成平移
-	for (const auto& [X, Y, Scale] : this->MoveCameraCommands)
+	/// 执行帧内所有挂起的平移指令并清空
+	for (const auto& [x, y, scale] : this->pendingMovementCommands)
 	{
-		auto Movement = FVector2D(X, Y);
-		Movement.Normalize();
-		Movement *= this->CurrentMovementSpeed * Scale * this->DeltaSeconds;
+		auto directionVector = FVector2D(x, y);
+		directionVector.Normalize();
+		directionVector *= this->currentMovementSpeed * scale * this->deltaSeconds;
 		
-		this->JumpTo(
-			this->RootComponent->GetComponentLocation() + FVector(Movement.X, Movement.Y, 0.0f)
+		this->jumpTo(
+			this->rootComponent->GetComponentLocation() + FVector(directionVector.X, directionVector.Y, 0.0f)
 		);
 	}
 
-	this->MoveCameraCommands.Empty();
+	this->pendingMovementCommands.Empty();
 }
 
-void URTSCamera::CollectComponentDependencyReferences()
+void URTSCamera::resolveComponentDependencyPointers()
 {
-	/// 缓存所有者及其核心组件指针以供快速访问
-	this->CameraOwner = this->GetOwner();
-	this->RootComponent = this->CameraOwner->GetRootComponent();
-	this->CameraComponent = Cast<UCameraComponent>(this->CameraOwner->GetComponentByClass(UCameraComponent::StaticClass()));
-	this->SpringArmComponent = Cast<USpringArmComponent>(this->CameraOwner->GetComponentByClass(USpringArmComponent::StaticClass()));
-	this->RTSPlayerController = UGameplayStatics::GetPlayerController(this->GetWorld(), 0);
+	/// 获取所有关键组件的指针，作为该插件架构的基石
+	this->cameraOwner = this->GetOwner();
+	this->rootComponent = this->cameraOwner->GetRootComponent();
+	this->cameraComponent = Cast<UCameraComponent>(this->cameraOwner->GetComponentByClass(UCameraComponent::StaticClass()));
+	this->springArmComponent = Cast<USpringArmComponent>(this->cameraOwner->GetComponentByClass(USpringArmComponent::StaticClass()));
+	this->realTimeStrategyPlayerController = UGameplayStatics::GetPlayerController(this->GetWorld(), 0);
 }
 
-void URTSCamera::ConfigureSpringArm()
+void URTSCamera::setupInitialSpringArmState()
 {
-	/// 初始化弹簧臂臂长及旋转参数
-	this->DesiredZoomLength = this->MinimumZoomLength;
-	this->SpringArmComponent->TargetArmLength = this->DesiredZoomLength;
-	this->SpringArmComponent->bDoCollisionTest = false;
-	this->SpringArmComponent->bEnableCameraLag = this->EnableCameraLag;
-	this->SpringArmComponent->bEnableCameraRotationLag = this->EnableCameraRotationLag;
-	this->SpringArmComponent->SetRelativeRotation(
+	/// 配置弹簧臂的物理约束与渲染初始位姿
+	this->desiredZoomLength = this->minimumZoomLength;
+	this->springArmComponent->TargetArmLength = this->desiredZoomLength;
+	this->springArmComponent->bDoCollisionTest = false;
+	this->springArmComponent->bEnableCameraLag = this->enableCameraLag;
+	this->springArmComponent->bEnableCameraRotationLag = this->enableCameraRotationLag;
+	this->springArmComponent->SetRelativeRotation(
 		FRotator::MakeFromEuler(
 			FVector(
 				0.0,
-				this->StartingYAngle,
-				this->StartingZAngle
+				this->startingPitchAngle,
+				this->startingYawAngle
 			)
 		)
 	);
 }
 
-void URTSCamera::TryToFindBoundaryVolumeReference()
+void URTSCamera::locateMapBoundaryVolumeByTag()
 {
-	/// 通过标签检索地图中的相机边界体积
-	TArray<AActor*> BlockingVolumes;
+	/// 在世界中通过静态标签检索用于运动边界约束的 Actor
+	TArray<AActor*> results;
 	UGameplayStatics::GetAllActorsOfClassWithTag(
 		this->GetWorld(),
 		AActor::StaticClass(),
-		this->CameraBlockingVolumeTag,
-		BlockingVolumes
+		this->cameraBlockingVolumeTag,
+		results
 	);
 
-	if (BlockingVolumes.Num() > 0)
+	if (results.Num() > 0)
 	{
-		this->BoundaryVolume = BlockingVolumes[0];
-		
-		/// 初始化预分配视野点数组并触发初次刷新
-		MinimapFrustumPoints.SetNum(4);
-		this->UpdateMinimapFrustum();
+		this->movementBoundaryVolume = results[0];
+		/// 初始化視野投影静态缓存点并执行初次同步
+		this->updateMinimapFrustum();
 	}
 }
 
-void URTSCamera::ConditionallyEnableEdgeScrolling()
+void URTSCamera::configureInputModeForEdgeScrolling()
 {
-	/// 如已启用，则将鼠标锁定并在视口中显示
-	if (this->EnableEdgeScrolling)
+	/// 当鼠标用于边缘滚动时，强制应用视口锁定策略
+	if (this->enableEdgeScrolling)
 	{
-		FInputModeGameAndUI InputMode;
-		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::LockAlways);
-		InputMode.SetHideCursorDuringCapture(false);
-		this->RTSPlayerController->SetInputMode(InputMode);
+		FInputModeGameAndUI gameModeSettings;
+		gameModeSettings.SetLockMouseToViewportBehavior(EMouseLockMode::LockAlways);
+		gameModeSettings.SetHideCursorDuringCapture(false);
+		this->realTimeStrategyPlayerController->SetInputMode(gameModeSettings);
 	}
 }
 
-void URTSCamera::CheckForEnhancedInputComponent()
+void URTSCamera::validateEnhancedInputAvailability()
 {
-	/// 检查是否配置了增强输入组件，若缺失则打印视觉错误提示
-	if (Cast<UEnhancedInputComponent>(this->RTSPlayerController->InputComponent) == nullptr)
+	/// 校验当前的 InputComponent 是否兼容 Enhanced Input 语法
+	if (Cast<UEnhancedInputComponent>(this->realTimeStrategyPlayerController->InputComponent) == nullptr)
 	{
 		UKismetSystemLibrary::PrintString(
 			this->GetWorld(),
-			TEXT("Error: Enhanced input component not found. Check Project Settings > Input."), true, true,
+			TEXT("Warning: RTSCamera requires Enhanced Input Component! Check Project Settings."), true, true,
 			FLinearColor::Red,
 			100
 		);
 	}
 }
 
-void URTSCamera::BindInputMappingContext()
+void URTSCamera::registerInputMappingContext()
 {
-	/// 绑定增强输入上下文，并显示鼠标光标
-	if (RTSPlayerController && RTSPlayerController->GetLocalPlayer())
+	/// 向玩家输入子系统注册相机专用的映射上下文
+	if (this->realTimeStrategyPlayerController && this->realTimeStrategyPlayerController->GetLocalPlayer())
 	{
-		if (const auto Input = RTSPlayerController->GetLocalPlayer()->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>())
+		if (const auto inputSystem = this->realTimeStrategyPlayerController->GetLocalPlayer()->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>())
 		{
-			RTSPlayerController->bShowMouseCursor = true;
+			this->realTimeStrategyPlayerController->bShowMouseCursor = true;
 
-			if (!Input->HasMappingContext(this->InputMappingContext))
+			if (!inputSystem->HasMappingContext(this->inputMappingContext))
 			{
-				Input->AddMappingContext(this->InputMappingContext, 0);
+				inputSystem->AddMappingContext(this->inputMappingContext, 0);
 			}
 		}
 	}
 }
 
-void URTSCamera::BindInputActions()
+void URTSCamera::bindActionCallbacks()
 {
-	/// 将输入动作事件绑定到本地处理函数
-	if (const auto EnhancedInputComponent = Cast<UEnhancedInputComponent>(this->RTSPlayerController->InputComponent))
+	/// 执行运动指令与 C++ 响应函数的逻辑挂挂接
+	if (const auto eic = Cast<UEnhancedInputComponent>(this->realTimeStrategyPlayerController->InputComponent))
 	{
-		EnhancedInputComponent->BindAction(
-			this->ZoomCamera,
-			ETriggerEvent::Triggered,
-			this,
-			&URTSCamera::OnZoomCamera
-		);
-
-		EnhancedInputComponent->BindAction(
-			this->RotateCameraAxis,
-			ETriggerEvent::Triggered,
-			this,
-			&URTSCamera::OnRotateCamera
-		);
-
-		EnhancedInputComponent->BindAction(
-			this->TurnCameraLeft,
-			ETriggerEvent::Triggered,
-			this,
-			&URTSCamera::OnTurnCameraLeft
-		);
-
-		EnhancedInputComponent->BindAction(
-			this->TurnCameraRight,
-			ETriggerEvent::Triggered,
-			this,
-			&URTSCamera::OnTurnCameraRight
-		);
-
-		EnhancedInputComponent->BindAction(
-			this->MoveCameraXAxis,
-			ETriggerEvent::Triggered,
-			this,
-			&URTSCamera::OnMoveCameraXAxis
-		);
-
-		EnhancedInputComponent->BindAction(
-			this->MoveCameraYAxis,
-			ETriggerEvent::Triggered,
-			this,
-			&URTSCamera::OnMoveCameraYAxis
-		);
-
-		EnhancedInputComponent->BindAction(
-			this->DragCamera,
-			ETriggerEvent::Triggered,
-			this,
-			&URTSCamera::OnDragCamera
-		);
+		eic->BindAction(this->zoomCameraAction, ETriggerEvent::Triggered, this, &URTSCamera::onZoomCameraActionTriggered);
+		eic->BindAction(this->rotateCameraAxisAction, ETriggerEvent::Triggered, this, &URTSCamera::onRotateCameraActionTriggered);
+		eic->BindAction(this->turnCameraLeftAction, ETriggerEvent::Triggered, this, &URTSCamera::onTurnCameraLeftActionTriggered);
+		eic->BindAction(this->turnCameraRightAction, ETriggerEvent::Triggered, this, &URTSCamera::onTurnCameraRightActionTriggered);
+		eic->BindAction(this->moveCameraXAxisAction, ETriggerEvent::Triggered, this, &URTSCamera::onMoveCameraXAxisActionTriggered);
+		eic->BindAction(this->moveCameraYAxisAction, ETriggerEvent::Triggered, this, &URTSCamera::onMoveCameraYAxisActionTriggered);
+		eic->BindAction(this->dragCameraAction, ETriggerEvent::Triggered, this, &URTSCamera::onDragCameraActionTriggered);
 	}
 }
 
-void URTSCamera::SetActiveCamera()
+void URTSCamera::setActiveCamera()
 {
-	/// 将当前控制器的观察目标设置为本组件的所有者
-	this->RTSPlayerController->SetViewTarget(this->GetOwner());
+	/// 将玩家当前的渲染视角强制聚焦于此组件
+	this->realTimeStrategyPlayerController->SetViewTarget(this->GetOwner());
 }
 
-void URTSCamera::JumpTo(const FVector Position)
+void URTSCamera::jumpTo(const FVector position)
 {
-	/// 保持当前高度不变，更新水平位置并刷新视野
-	float CurrentZ = this->RootComponent->GetComponentLocation().Z;
-	this->RootComponent->SetWorldLocation(FVector(Position.X, Position.Y, CurrentZ));
-	this->UpdateMinimapFrustum();
+	/// 执行瞬时的视变换同步，并触发视野投影点手动刷新
+	float cachedZ = this->rootComponent->GetComponentLocation().Z;
+	this->rootComponent->SetWorldLocation(FVector(position.X, position.Y, cachedZ));
+	this->updateMinimapFrustum();
 }
 
-void URTSCamera::ConditionallyPerformEdgeScrolling()
+void URTSCamera::executeEdgeScrollingEvaluation()
 {
-	/// 如已启用边缘滚动且当前未处于鼠标拖拽状态，则执行视口边缘推进逻辑
-	if (this->EnableEdgeScrolling && !this->IsDragging)
+	/// 仅在功能开启且未进行拖拽干扰时，执行屏幕边缘检测
+	if (this->enableEdgeScrolling && !this->isDragging)
 	{
-		const FVector OldLocation = this->RootComponent->GetComponentLocation();
+		const FVector locationBeforePush = this->rootComponent->GetComponentLocation();
 		
-		this->EdgeScrollLeft();
-		this->EdgeScrollRight();
-		this->EdgeScrollUp();
-		this->EdgeScrollDown();
+		this->performEdgeScrollLeft();
+		this->performEdgeScrollRight();
+		this->performEdgeScrollUp();
+		this->performEdgeScrollDown();
 
-		/// 位置发生变动时立即同步视野框
-		if (!this->RootComponent->GetComponentLocation().Equals(OldLocation, 0.1f))
+		if (!this->rootComponent->GetComponentLocation().Equals(locationBeforePush, 0.1f))
 		{
-			this->UpdateMinimapFrustum();
+			this->updateMinimapFrustum();
 		}
 	}
 }
 
-void URTSCamera::EdgeScrollLeft()
+void URTSCamera::performEdgeScrollLeft()
 {
-	/// 计算鼠标在左侧边缘的深度，并以此确定摄像机左移量
-	const auto MousePosition = UWidgetLayoutLibrary::GetMousePositionOnViewport(this->GetWorld());
-	const auto ViewportSize = UWidgetLayoutLibrary::GetViewportWidgetGeometry(this->GetWorld()).GetLocalSize();
-	const auto NormalizedPosition = 1 - UKismetMathLibrary::NormalizeToRange(
-		MousePosition.X,
-		0.0f,
-		ViewportSize.X * this->DistanceFromEdgeThreshold
-	);
+	/// 基于鼠标左偏移计算平移推力
+	const auto mp = UWidgetLayoutLibrary::GetMousePositionOnViewport(this->GetWorld());
+	const auto vs = UWidgetLayoutLibrary::GetViewportWidgetGeometry(this->GetWorld()).GetLocalSize();
+	const auto normalizedVal = 1 - UKismetMathLibrary::NormalizeToRange(mp.X, 0.0f, vs.X * this->distanceFromEdgeThreshold);
 
-	const float MovementAlpha = UKismetMathLibrary::FClamp(NormalizedPosition, 0.0, 1.0);
-
-	this->RootComponent->AddRelativeLocation(
-		-1 * this->RootComponent->GetRightVector() * MovementAlpha * this->CurrentMovementSpeed * this->DeltaSeconds
-	);
+	const float alpha = UKismetMathLibrary::FClamp(normalizedVal, 0.0, 1.0);
+	this->rootComponent->AddRelativeLocation(-1 * this->rootComponent->GetRightVector() * alpha * this->currentMovementSpeed * this->deltaSeconds);
 }
 
-void URTSCamera::EdgeScrollRight()
+void URTSCamera::performEdgeScrollRight()
 {
-	/// 计算鼠标在右侧边缘的深度，并以此确定摄像机右移量
-	const auto MousePosition = UWidgetLayoutLibrary::GetMousePositionOnViewport(this->GetWorld());
-	const auto ViewportSize = UWidgetLayoutLibrary::GetViewportWidgetGeometry(this->GetWorld()).GetLocalSize();
-	const auto NormalizedPosition = UKismetMathLibrary::NormalizeToRange(
-		MousePosition.X,
-		ViewportSize.X * (1 - this->DistanceFromEdgeThreshold),
-		ViewportSize.X
-	);
+	/// 基于鼠标右偏移计算平移推力
+	const auto mp = UWidgetLayoutLibrary::GetMousePositionOnViewport(this->GetWorld());
+	const auto vs = UWidgetLayoutLibrary::GetViewportWidgetGeometry(this->GetWorld()).GetLocalSize();
+	const auto normalizedVal = UKismetMathLibrary::NormalizeToRange(mp.X, vs.X * (1 - this->distanceFromEdgeThreshold), vs.X);
 
-	const float MovementAlpha = UKismetMathLibrary::FClamp(NormalizedPosition, 0.0, 1.0);
-	this->RootComponent->AddRelativeLocation(
-		this->RootComponent->GetRightVector() * MovementAlpha * this->CurrentMovementSpeed * this->DeltaSeconds
-	);
+	const float alpha = UKismetMathLibrary::FClamp(normalizedVal, 0.0, 1.0);
+	this->rootComponent->AddRelativeLocation(this->rootComponent->GetRightVector() * alpha * this->currentMovementSpeed * this->deltaSeconds);
 }
 
-void URTSCamera::EdgeScrollUp()
+void URTSCamera::performEdgeScrollUp()
 {
-	/// 计算鼠标在上侧边缘的深度，并以此确定摄像机前移量
-	const auto MousePosition = UWidgetLayoutLibrary::GetMousePositionOnViewport(this->GetWorld());
-	const auto ViewportSize = UWidgetLayoutLibrary::GetViewportWidgetGeometry(this->GetWorld()).GetLocalSize();
-	const auto NormalizedPosition = UKismetMathLibrary::NormalizeToRange(
-		MousePosition.Y,
-		0.0f,
-		ViewportSize.Y * this->DistanceFromEdgeThreshold
-	);
+	/// 基于鼠标上偏移计算平移推力
+	const auto mp = UWidgetLayoutLibrary::GetMousePositionOnViewport(this->GetWorld());
+	const auto vs = UWidgetLayoutLibrary::GetViewportWidgetGeometry(this->GetWorld()).GetLocalSize();
+	const auto normalizedVal = UKismetMathLibrary::NormalizeToRange(mp.Y, 0.0f, vs.Y * this->distanceFromEdgeThreshold);
 
-	const float MovementAlpha = 1 - UKismetMathLibrary::FClamp(NormalizedPosition, 0.0, 1.0);
-	this->RootComponent->AddRelativeLocation(
-		this->RootComponent->GetForwardVector() * MovementAlpha * this->CurrentMovementSpeed * this->DeltaSeconds
-	);
+	const float alpha = 1 - UKismetMathLibrary::FClamp(normalizedVal, 0.0, 1.0);
+	this->rootComponent->AddRelativeLocation(this->rootComponent->GetForwardVector() * alpha * this->currentMovementSpeed * this->deltaSeconds);
 }
 
-void URTSCamera::EdgeScrollDown()
+void URTSCamera::performEdgeScrollDown()
 {
-	/// 计算鼠标在下侧边缘的深度，并以此确定摄像机后移量
-	const auto MousePosition = UWidgetLayoutLibrary::GetMousePositionOnViewport(this->GetWorld());
-	const auto ViewportSize = UWidgetLayoutLibrary::GetViewportWidgetGeometry(this->GetWorld()).GetLocalSize();
-	const auto NormalizedPosition = UKismetMathLibrary::NormalizeToRange(
-		MousePosition.Y,
-		ViewportSize.Y * (1 - this->DistanceFromEdgeThreshold),
-		ViewportSize.Y
-	);
+	/// 基于鼠标下偏移计算平移推力
+	const auto mp = UWidgetLayoutLibrary::GetMousePositionOnViewport(this->GetWorld());
+	const auto vs = UWidgetLayoutLibrary::GetViewportWidgetGeometry(this->GetWorld()).GetLocalSize();
+	const auto normalizedVal = UKismetMathLibrary::NormalizeToRange(mp.Y, vs.Y * (1 - this->distanceFromEdgeThreshold), vs.Y);
 
-	const float MovementAlpha = UKismetMathLibrary::FClamp(NormalizedPosition, 0.0, 1.0);
-	this->RootComponent->AddRelativeLocation(
-		-1 * this->RootComponent->GetForwardVector() * MovementAlpha * this->CurrentMovementSpeed * this->DeltaSeconds
-	);
+	const float alpha = UKismetMathLibrary::FClamp(normalizedVal, 0.0, 1.0);
+	this->rootComponent->AddRelativeLocation(-1 * this->rootComponent->GetForwardVector() * alpha * this->currentMovementSpeed * this->deltaSeconds);
 }
 
-void URTSCamera::FollowTargetIfSet()
+void URTSCamera::updateFollowPositionIfTargetActive()
 {
-	if (this->CameraFollowTarget != nullptr)
+	/// 将相机根坐标强行锚定在追随目标之上
+	if (this->activeCameraFollowTarget != nullptr)
 	{
-		this->JumpTo(this->CameraFollowTarget->GetActorLocation());
+		this->jumpTo(this->activeCameraFollowTarget->GetActorLocation());
 	}
 }
 
-void URTSCamera::SmoothTargetArmLengthToDesiredZoom()
+void URTSCamera::handleTargetArmLengthInterpolation()
 {
-	/// 使用平滑插值算法将弹簧臂长度拉近至目标意图长度
-	float OldArmLength = this->SpringArmComponent->TargetArmLength;
-	
-	this->SpringArmComponent->TargetArmLength = FMath::FInterpTo(
-		this->SpringArmComponent->TargetArmLength,
-		this->DesiredZoomLength,
-		this->DeltaSeconds,
-		this->ZoomCatchupSpeed
+	/// 基于 deltaSeconds 驱动缩放插值，完善物理层的顺滑过渡
+	this->springArmComponent->TargetArmLength = FMath::FInterpTo(
+		this->springArmComponent->TargetArmLength,
+		this->desiredZoomLength,
+		this->deltaSeconds,
+		this->zoomCatchupSpeed
 	);
 }
 
-void URTSCamera::ConditionallyKeepCameraAtDesiredZoomAboveGround()
+void URTSCamera::rectifyRootHeightFromTerrain()
 {
-	/// 动态调整相机高度以贴合地形
-	if (this->EnableDynamicCameraHeight)
+	/// 射线补偿检测：使根节点坐标实时贴合地形海拔
+	if (this->enableDynamicCameraHeight)
 	{
-		const FVector RootWorldLocation = this->RootComponent->GetComponentLocation();
-		const TArray<AActor*> ActorsToIgnore;
+		const FVector currentRootXYZ = this->rootComponent->GetComponentLocation();
+		const TArray<AActor*> excluded;
 
-		FHitResult HitResult;
-		bool bDidHit = UKismetSystemLibrary::LineTraceSingle(
+		FHitResult floorHit;
+		bool bValidFloor = UKismetSystemLibrary::LineTraceSingle(
 			this->GetWorld(),
-			FVector(RootWorldLocation.X, RootWorldLocation.Y, RootWorldLocation.Z + this->FindGroundTraceLength),
-			FVector(RootWorldLocation.X, RootWorldLocation.Y, RootWorldLocation.Z - this->FindGroundTraceLength),
-			UEngineTypes::ConvertToTraceType(this->CollisionChannel),
+			FVector(currentRootXYZ.X, currentRootXYZ.Y, currentRootXYZ.Z + this->findGroundTraceLength),
+			FVector(currentRootXYZ.X, currentRootXYZ.Y, currentRootXYZ.Z - this->findGroundTraceLength),
+			UEngineTypes::ConvertToTraceType(this->collisionChannel),
 			true,
-			ActorsToIgnore,
-			EDrawDebugTrace::Type::None,
-			HitResult,
+			excluded,
+			EDrawDebugTrace::None,
+			floorHit,
 			true
 		);
 
-		if (bDidHit)
+		if (bValidFloor)
 		{
-			this->RootComponent->SetWorldLocation(
-				FVector(
-					HitResult.Location.X,
-					HitResult.Location.Y,
-					HitResult.Location.Z
-				)
-			);
+			this->rootComponent->SetWorldLocation(FVector(floorHit.Location.X, floorHit.Location.Y, floorHit.Location.Z));
 		}
 	}
 }
 
-void URTSCamera::ConditionallyApplyCameraBounds()
+void URTSCamera::enforceCameraMovementBounds()
 {
-	/// 如已定义边界，则将当前位置限制在边界体积范围内
-	if (this->BoundaryVolume != nullptr)
+	/// 强制检查并将相机坐标拉回预定义的体积包围阵列内
+	if (this->movementBoundaryVolume != nullptr)
 	{
-		const FVector CurrentWorldLocation = this->RootComponent->GetComponentLocation();
-		FVector Origin;
-		FVector Extents;
-		this->BoundaryVolume->GetActorBounds(false, Origin, Extents);
+		const FVector posToClamp = this->rootComponent->GetComponentLocation();
+		FVector boxOrigin;
+		FVector boxExtents;
+		this->movementBoundaryVolume->GetActorBounds(false, boxOrigin, boxExtents);
 
-		this->RootComponent->SetWorldLocation(
+		this->rootComponent->SetWorldLocation(
 			FVector(
-				UKismetMathLibrary::Clamp(CurrentWorldLocation.X, Origin.X - Extents.X, Origin.X + Extents.X),
-				UKismetMathLibrary::Clamp(CurrentWorldLocation.Y, Origin.Y - Extents.Y, Origin.Y + Extents.Y),
-				CurrentWorldLocation.Z
+				UKismetMathLibrary::Clamp(posToClamp.X, boxOrigin.X - boxExtents.X, boxOrigin.X + boxExtents.X),
+				UKismetMathLibrary::Clamp(posToClamp.Y, boxOrigin.Y - boxExtents.Y, boxOrigin.Y + boxExtents.Y),
+				posToClamp.Z
 			)
 		);
 	}
 }
 
-void URTSCamera::UpdateMinimapFrustum()
+void URTSCamera::updateMinimapFrustum()
 {
-	if (!SpringArmComponent || !CameraComponent || !RootComponent) return;
+	/// 战略視野投影核心逻辑：将缩放意图(DesiredZoomLength)直接转化为地平面的投影区域，确保 UI 响应不受物理插值影响
+	if (!this->springArmComponent || !this->cameraComponent || !this->rootComponent) return;
 	
-	/// 1. 提取当前相机的策略参数 (X, Y, Z_Intent, Pitch, Yaw)
-	FVector RootLocation = RootComponent->GetComponentLocation();
-	FRotator RootRotation = RootComponent->GetComponentRotation();
-	FRotator ArmRotation = SpringArmComponent->GetRelativeRotation();
+	const FVector rPos = this->rootComponent->GetComponentLocation();
+	const FRotator rRot = this->rootComponent->GetComponentRotation();
+	const FRotator aRot = this->springArmComponent->GetRelativeRotation();
 	
-	/// 合成逻辑相机旋转 (使用根组件的 Yaw 和弹簧臂的 Pitch)
-	FRotator LogicCameraRotation = RootRotation + ArmRotation;
+	/// 合成相机的总逻辑朝向
+	const FRotator logicalRotation = rRot + aRot;
 
-	/// 2. 使用意图高度 (DesiredZoomLength) 计算相机逻辑位置
-	float CameraArmLength = this->DesiredZoomLength; 
-	FVector LogicCameraLocation = RootLocation + LogicCameraRotation.Vector() * (-CameraArmLength);
+	/// 关键点：使用 DesiredZoomLength 预判物理终点位置
+	const float intentLength = this->desiredZoomLength; 
+	const FVector logicalOrigin = rPos + logicalRotation.Vector() * (-intentLength);
 
-	/// 3. 获取相机内参并计算视野张角
-	float FieldOfView = CameraComponent->FieldOfView;
-	float AspectRatio = CameraComponent->AspectRatio;
-    if(AspectRatio <= 0.0f) AspectRatio = 1.777f; 
+	const float fovValue = this->cameraComponent->FieldOfView;
+	float arValue = this->cameraComponent->AspectRatio;
+    if(arValue <= 0.0f) arValue = 1.777f; 
 
-	float HalfHorizontalFOV = FMath::DegreesToRadians(FieldOfView) / 2.0f;
-	float HalfVerticalFOV = FMath::Atan(FMath::Tan(HalfHorizontalFOV) / AspectRatio);
+	const float hFOV = FMath::DegreesToRadians(fovValue) / 2.0f;
+	const float vFOV = FMath::Atan(FMath::Tan(hFOV) / arValue);
 
-	float TangentHorizontal = FMath::Tan(HalfHorizontalFOV);
-	float TangentVertical = FMath::Tan(HalfVerticalFOV);
+	const float tanH = FMath::Tan(hFOV);
+	const float tanV = FMath::Tan(vFOV);
 
-	/// 4. 计算视野四个方向的射线向量
-	FVector ForwardVector = LogicCameraRotation.Vector();
-	FVector RightVector = FRotationMatrix(LogicCameraRotation).GetScaledAxis(EAxis::Y);
-	FVector UpVector = FRotationMatrix(LogicCameraRotation).GetScaledAxis(EAxis::Z);
+	const FVector forwardVector = logicalRotation.Vector();
+	const FVector rightVector = FRotationMatrix(logicalRotation).GetScaledAxis(EAxis::Y);
+	const FVector upVector = FRotationMatrix(logicalRotation).GetScaledAxis(EAxis::Z);
 
-	FVector DirectionTopLeft = (ForwardVector - RightVector * TangentHorizontal + UpVector * TangentVertical).GetSafeNormal();
-	FVector DirectionTopRight = (ForwardVector + RightVector * TangentHorizontal + UpVector * TangentVertical).GetSafeNormal();
-	FVector DirectionBottomLeft = (ForwardVector - RightVector * TangentHorizontal - UpVector * TangentVertical).GetSafeNormal();
-	FVector DirectionBottomRight = (ForwardVector + RightVector * TangentHorizontal - UpVector * TangentVertical).GetSafeNormal();
+	/// 计算四个边界射线
+	const FVector trDir = (forwardVector + rightVector * tanH + upVector * tanV).GetSafeNormal();
+	const FVector tlDir = (forwardVector - rightVector * tanH + upVector * tanV).GetSafeNormal();
+	const FVector brDir = (forwardVector + rightVector * tanH - upVector * tanV).GetSafeNormal();
+	const FVector blDir = (forwardVector - rightVector * tanH - upVector * tanV).GetSafeNormal();
 
-	/// 5. 计算射线与地平面的交点进行位置投射
-	float GroundZ = this->RootComponent->GetComponentLocation().Z;
+	const float gZ = this->rootComponent->GetComponentLocation().Z;
 	
-	auto IntersectGround = [&](const FVector& RayOrigin, const FVector& RayDirection) -> FVector
+	auto calcInt = [&](const FVector& ro, const FVector& rd) -> FVector
 	{
-		if (RayDirection.Z >= -0.001f) return RayOrigin + RayDirection * 100000.0f;
-		float t = (GroundZ - RayOrigin.Z) / RayDirection.Z;
-		if (t < 0.0f) return RayOrigin + RayDirection * 100000.0f;
-		return RayOrigin + t * RayDirection;
+		if (rd.Z >= -0.001f) return ro + rd * 100000.0f;
+		float t = (gZ - ro.Z) / rd.Z;
+		if (t < 0.0f) return ro + rd * 100000.0f;
+		return ro + t * rd;
 	};
 
-	/// 6. 更新视野点并缓存同步至 UI
-	if (MinimapFrustumPoints.Num() != 4)
-	{
-		MinimapFrustumPoints.SetNum(4);
-	}
+	/// 填充静态数据数组，供外部 Widget 直接读取以降低渲染层级的内存开销
+	this->minimapFrustumPoints[0] = calcInt(logicalOrigin, tlDir);
+	this->minimapFrustumPoints[1] = calcInt(logicalOrigin, trDir);
+	this->minimapFrustumPoints[2] = calcInt(logicalOrigin, brDir);
+	this->minimapFrustumPoints[3] = calcInt(logicalOrigin, blDir);
 
-	MinimapFrustumPoints[0] = IntersectGround(LogicCameraLocation, DirectionTopLeft);
-	MinimapFrustumPoints[1] = IntersectGround(LogicCameraLocation, DirectionTopRight);
-	MinimapFrustumPoints[2] = IntersectGround(LogicCameraLocation, DirectionBottomRight);
-	MinimapFrustumPoints[3] = IntersectGround(LogicCameraLocation, DirectionBottomLeft);
+	/// 计算完成后发起广播，通知 UI 订阅者执行定向重绘
+	this->onMinimapFrustumUpdated.Broadcast();
 }

@@ -30,8 +30,9 @@ public:
 	void InitializeController();
 
 protected:
+	/// 小地图视野框的线条绘制宽度
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Minimap")
-	float LineWidth = 2.0f;
+	float lineWidth = 2.0f;
 	
 	virtual void NativeConstruct() override;
 	virtual int32 NativePaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override;
@@ -44,7 +45,15 @@ protected:
 	virtual void NativeOnMouseLeave(const FPointerEvent& InMouseEvent) override;
 
 private:
-	void FindRTSCamera();
+	/**
+	 * @brief       根据相机组件的引用定位并缓存相关依赖资产
+	 **/
+	void findRTSCamera();
+
+	/**
+	 * @brief       响应相机视野更新委托的回调函数，执行 UI 定向失效重绘
+	 **/
+	void handleMinimapFrustumUpdated();
 
 	/** Convert World Location (XY) to Widget Local Coordinates (UV * Size) */
 	FVector2D ConvertWorldToWidgetLocal(const FVector2D& WorldPos, const FVector2D& WidgetSize) const;
@@ -53,23 +62,27 @@ private:
 	FVector2D ConvertWidgetLocalToWorld(const FVector2D& LocalPos, const FVector2D& WidgetSize) const;
 
 protected:
-	/** Cached reference to the RTSCamera */
+	/** @brief 缓存的 RTS 相机组件引用 */
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "RTSCamera|Cache")
-	TObjectPtr<URTSCamera> CachedRTSCamera;
+	TObjectPtr<URTSCamera> cachedRTSCamera;
 
-	/** Cached reference to the actual Camera Component (Source of Truth for FOV) */
+	/** @brief 缓存的相机渲染组件，作为视场角(FOV)的原始依据 */
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "RTSCamera|Cache")
-	TObjectPtr<UCameraComponent> CachedCameraComponent;
+	TObjectPtr<UCameraComponent> cachedCameraComponent;
 
-	/** Cached reference to the Spring Arm (Source of Truth for Zoom/Rotation) */
+	/** @brief 缓存的弹簧臂组件，作为相机缩放与倾斜的物理依据 */
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "RTSCamera|Cache")
-	TObjectPtr<USpringArmComponent> CachedSpringArm;
+	TObjectPtr<USpringArmComponent> cachedSpringArm;
 
-	/** Derived from BoundaryVolume */
-	FVector CachedBoundsOrigin = FVector::ZeroVector;
-	FVector CachedBoundsExtent = FVector(100.f, 100.f, 100.f);
+	/// 地图边界的中心点缓存
+	FVector cachedBoundsOrigin = FVector::ZeroVector;
+	
+	/// 地图边界的延伸范围缓存
+	FVector cachedBoundsExtent = FVector(100.f, 100.f, 100.f);
+	
+	/// 标识当前缓存的地图边界数据是否有效
 	bool bHasValidBounds = false;
 
-	/** Input State */
+	/// 状态位：标识玩家当前是否正在通过鼠标在控件上执行位置拖拽
 	bool bIsDragging = false;
 };
