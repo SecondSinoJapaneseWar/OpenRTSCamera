@@ -36,7 +36,11 @@ public class OpenRTSCamera : ModuleRules
 				"Slate",
 				"SlateCore",
 				"UMG",
-				"InputCore"
+				"InputCore",
+				"MassBattleMinimap",
+				"MassBattle",
+				"MassAPI",
+				"MassEntity"
 			}
 		);
 

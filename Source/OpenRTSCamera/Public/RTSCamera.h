@@ -22,15 +22,15 @@ struct FMoveCameraCommand
 	
 	/// 目标位置在 X 轴上的分量增量
 	UPROPERTY()
-	float x = 0;
+	float xAxisValue = 0;
 	
 	/// 目标位置在 Y 轴上的分量增量
 	UPROPERTY()
-	float y = 0;
+	float yAxisValue = 0;
 	
 	/// 本次移动指令的缩放权重比例
 	UPROPERTY()
-	float scale = 0;
+	float movementScale = 0;
 };
 
 /**
@@ -106,39 +106,39 @@ public:
 	AActor* getMovementBoundaryVolume() const { return movementBoundaryVolume; }
 
 	/// 相机缩放的最小目标距离（最接近地面）
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "RTSCamera - Zoom Settings")
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "RTSCamera - Zoom Settings", meta = (DisplayName = "最小缩放高度", ToolTip = "相机距离地面的最近距离。"))
 	float minimumZoomLength;
 
 	/// 相机缩放的最大目标距离（最高视野）
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "RTSCamera - Zoom Settings")
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "RTSCamera - Zoom Settings", meta = (DisplayName = "最大缩放高度", ToolTip = "相机距离地面的最远距离。"))
 	float maximumZoomLength;
 
 	/// 缩放插值的补全速率（值越大，物理位置追赶意图的速度越快）
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "RTSCamera - Zoom Settings")
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "RTSCamera - Zoom Settings", meta = (DisplayName = "缩放平滑速度", ToolTip = "物理相机追赶缩放意图的速度。"))
 	float zoomCatchupSpeed;
 
 	/// 单次滚轮操作触发的缩放距离步长
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "RTSCamera - Zoom Settings")
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "RTSCamera - Zoom Settings", meta = (DisplayName = "单次缩进步幅", ToolTip = "鼠标滚轮单次滚动引起的距离变化量。"))
 	float zoomSpeed;
 
 	/// 初始化时的相机俯仰角 (Pitch)
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "RTSCamera")
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "RTSCamera", meta = (DisplayName = "初始俯仰角", ToolTip = "相机的初始垂直倾斜角度（度）。"))
 	float startingPitchAngle;
 
 	/// 初始化时的相机偏航角 (Yaw)
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "RTSCamera")
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "RTSCamera", meta = (DisplayName = "初始偏航角", ToolTip = "相机的初始水平旋转角度（度）。"))
 	float startingYawAngle;
 
 	/// 相机在最大缩放高度时的移动速度上限
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "RTSCamera")
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "RTSCamera", meta = (DisplayName = "最大平移速度", ToolTip = "在高空缩放时的移动速度。"))
 	float maxMovementSpeed;
 
 	/// 相机在最小缩放高度时的基础移动速度
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "RTSCamera")
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "RTSCamera", meta = (DisplayName = "最小平移速度", ToolTip = "在低空缩放时的移动速度。"))
 	float minMovementSpeed;
 
 	/// 输入控制下的水平旋转感官速度
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "RTSCamera")
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "RTSCamera", meta = (DisplayName = "旋转响应速度", ToolTip = "相机水平旋转的速度权重。"))
 	float rotationSpeed;
 	
 	/// 相机拖拽操作在视口中的拉伸增量比例
@@ -146,16 +146,31 @@ public:
 		BlueprintReadWrite,
 		EditAnywhere,
 		Category = "RTSCamera",
-		meta = (ClampMin = "0.0", ClampMax = "1.0")
+		meta = (ClampMin = "0.0", ClampMax = "1.0", DisplayName = "拖拽惯性系数", ToolTip = "鼠标拖拽移动时的平滑权重。")
 	)
 	float dragExtent;
 
+	/** 当接近边界时，约束触发的插值强度 (0=相机根部重合边缘, 1=视野边缘对齐边缘) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera | Boundary", meta = (ClampMin = "0.0", ClampMax = "1.0", DisplayName = "低空边界约束强度", ToolTip = "0表示相机的根组件中心能够到达边界，1表示相机的视野边缘会被锁在地图内部。"))
+	float minimumZoomBoundaryConstraint;
+
+	/** 边界侧倾过渡区的比例 (0.15 代表最后 15% 区域触发) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera | Boundary", meta = (ClampMin = "0.0", ClampMax = "0.5", DisplayName = "边界侧倾过渡比例", ToolTip = "定义从地图边缘向内多少比例开始产生侧倾效果。"))
+	float boundaryTransitionZoneRatio;
+
+	/** 是否启用 X 轴 (南北/上下) 方向的边界视野约束 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera | Boundary", meta = (DisplayName = "启用 X 轴边界约束"))
+	bool bEnableXBoundaryConstraint;
+
+	/** 是否启用 Y 轴 (东西/左右) 方向的边界视野约束 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera | Boundary", meta = (DisplayName = "启用 Y 轴边界约束"))
+	bool bEnableYBoundaryConstraint;
 	/// 启用相机位置移动的插值延迟
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "RTSCamera")
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "RTSCamera", meta = (DisplayName = "启用位置平滑", ToolTip = "开启后相机移动将具有物理惯性。"))
 	bool enableCameraLag;
 
 	/// 启用相机视野旋转的插值延迟
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "RTSCamera")
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "RTSCamera", meta = (DisplayName = "启用旋转平滑", ToolTip = "开启后相机旋转将具有物理惯性。"))
 	bool enableCameraRotationLag;
 
 	/// 启用基于地形起伏动态修正相机根高度的功能
@@ -281,11 +296,11 @@ protected:
 	/**
 	 * @brief       将坐标移动意图转化为战术指令并加入执行队列
 	 * 
-	 * @param       参数名称: x                             数据类型:        float
-	 * @param       参数名称: y                             数据类型:        float
-	 * @param       参数名称: scale                         数据类型:        float
+	 * @param       xAxisValue                      数据类型:        float
+	 * @param       yAxisValue                      数据类型:        float
+	 * @param       movementScale                   数据类型:        float
 	 **/
-	void requestCameraMovement(float x, float y, float scale);
+	void requestCameraMovement(float xAxisValue, float yAxisValue, float movementScale);
 
 	/**
 	 * @brief       在一个逻辑帧内，分步执行指令队列中积压的所有平移指令
@@ -339,19 +354,36 @@ private:
 	void updateFollowPositionIfTargetActive();
 	void handleTargetArmLengthInterpolation();
 	void rectifyRootHeightFromTerrain();
-	void enforceCameraMovementBounds();
+	
+	/** @brief 计算当前坐标下的边界补偿并应用 */
+	void applyBoundaryConstraints();
 
-	/// 检索边界体积时匹配的静态场景标签
-	UPROPERTY()
-	FName cameraBlockingVolumeTag;
+	/** @brief 基于 Y 坐标计算 Lateral Socket Offset */
+	float calculateYOffset(float worldY) const;
+
+	/** @brief 基于 X 坐标计算 Vertical Socket Offset */
+	float calculateXOffset(float worldX) const;
 
 	/// 相机当前正在锁定跟随的 Actor 实测对象
 	UPROPERTY()
 	AActor* activeCameraFollowTarget;
 
+	/// 缓存边界侧移量 (SocketOffset.Y)
+	float currentLateralSocketOffset;
+	/// 缓存边界纵移量 (SocketOffset.X)
+	float currentVerticalSocketOffset;
 	/// 自上一帧以来的时间增量（秒）
 	UPROPERTY()
 	float deltaSeconds;
+
+	/** @brief 预计算的横向延伸系数 (Lateral Reach / TargetArmLength) */
+	float lateralReachFactor;
+
+	/** @brief 预计算的纵向延伸系数 (Forward Reach / TargetArmLength) */
+	float forwardReachFactor;
+
+	/** @brief 预计算的后向延伸系数 (Backward Reach / TargetArmLength) */
+	float backwardReachFactor;
 
 	/// 状态位：指示是否正在进行鼠标拖拽操作
 	UPROPERTY()

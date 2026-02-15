@@ -38,6 +38,8 @@ protected:
 	virtual void DrawHUD() override;
 
 private:
+	void PerformMassSelection();
+
 	bool bIsDrawingSelectionBox;
 	bool bIsPerformingSelection;
 	FVector2D SelectionStart;

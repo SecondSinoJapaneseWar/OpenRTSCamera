@@ -26,6 +26,10 @@
 		{
 			"Name": "EnhancedInput",
 			"Enabled": true
+		},
+		{
+			"Name": "MassBattleMinimap",
+			"Enabled": true
 		}
 	],
 	"SupportURL": "https://github.com/HeyZoos/OpenRTSCamera/issues",
