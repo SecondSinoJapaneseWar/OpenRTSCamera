@@ -1,4 +1,7 @@
 #include "RTSHUD.h"
+#include "RTSSelectionSubsystem.h"
+#include "RTSSelectable.h"
+#include "MassBattleFuncLib.h"
 #include "RTSSelector.h"
 #include "Engine/Canvas.h"
 
@@ -6,7 +9,9 @@
 ARTSHUD::ARTSHUD()
 {
 	SelectionBoxColor = FLinearColor::Green;
+	SelectionBoxFillColor = FLinearColor(0.0f, 1.0f, 0.0f, 0.15f);
 	SelectionBoxThickness = 1.0f;
+	MinSelectionSizeSq = 1.0f; // 1 pixel threshold as requested
 	bIsDrawingSelectionBox = false;
 	bIsPerformingSelection = false;
 }
@@ -16,16 +21,35 @@ void ARTSHUD::DrawHUD()
 {
 	Super::DrawHUD(); // Call the base class implementation.
 
-	// Draw the selection box if it's active.
+	// Draw the selection box if it's active AND large enough to be a box.
 	if (bIsDrawingSelectionBox)
 	{
-		DrawSelectionBox(SelectionStart, SelectionEnd);
+		if (FVector2D::DistSquared(SelectionStart, SelectionEnd) > MinSelectionSizeSq)
+		{
+			DrawSelectionBox(SelectionStart, SelectionEnd);
+		}
 	}
 
+	// Perform selection actions if required.
 	// Perform selection actions if required.
 	if (bIsPerformingSelection)
 	{
 		PerformSelection();
+	}
+
+	// --- Input Polling (One-Step Solution) ---
+	if (APlayerController* PC = GetOwningPlayerController())
+	{
+		if (PC->WasInputKeyJustPressed(EKeys::Tab))
+		{
+			if (const ULocalPlayer* LP = PC->GetLocalPlayer())
+			{
+				if (URTSSelectionSubsystem* Subsystem = LP->GetSubsystem<URTSSelectionSubsystem>())
+				{
+					Subsystem->CycleGroup();
+				}
+			}
+		}
 	}
 }
 
@@ -33,6 +57,7 @@ void ARTSHUD::DrawHUD()
 void ARTSHUD::BeginSelection(const FVector2D& StartPoint)
 {
 	SelectionStart = StartPoint;
+	SelectionEnd = StartPoint; // Initialize End to Start to avoid stale data
 	bIsDrawingSelectionBox = true;
 }
 
@@ -54,11 +79,32 @@ void ARTSHUD::DrawSelectionBox_Implementation(const FVector2D& StartPoint, const
 {
 	if (Canvas)
 	{
-		// Calculate corners of the selection rectangle.
+		// Calculate Top-Left and Size
+		float MinX = FMath::Min(SelectionStart.X, SelectionEnd.X);
+		float MinY = FMath::Min(SelectionStart.Y, SelectionEnd.Y);
+		float Width = FMath::Abs(SelectionEnd.X - SelectionStart.X);
+		float Height = FMath::Abs(SelectionEnd.Y - SelectionStart.Y);
+
+		// 1. Draw Fill (Semi-transparent)
+		if (Width > 0 && Height > 0)
+		{
+			// Note: K2_DrawRect uses current Canvas position? No, it usually takes screen pos?
+			// Actually K2_DrawRect is tricky in UCanvas. 
+			// Standard way: Canvas->K2_DrawTexture(WhiteTexture, ScreenPos, ScreenSize, ... Tint).
+			// If we don't have a WhiteTexture, Update: UCanvas::K2_DrawMaterial matches best?
+			// Let's use `Canvas->K2_DrawPolygon`? No.
+			
+			// Ah, `DrawRect` (C++ API): `Canvas->DrawTile(WhiteTexture, X, Y, W, H, ...)`
+			// Wait, let's look at `Canvas->K2_DrawRect`. It exists in `UCanvas`.
+			// `void UCanvas::K2_DrawRect(FLinearColor RenderTextureColor, FVector2D ScreenPosition, FVector2D ScreenSize)`
+			
+			DrawRect(SelectionBoxFillColor, MinX, MinY, Width, Height);
+		}
+
+		// 2. Draw Borders
 		const auto TopRight = FVector2D(SelectionEnd.X, SelectionStart.Y);
 		const auto BottomLeft = FVector2D(SelectionStart.X, SelectionEnd.Y);
 
-		// Draw lines to form the selection rectangle.
 		Canvas->K2_DrawLine(SelectionStart, TopRight, SelectionBoxThickness, SelectionBoxColor);
 		Canvas->K2_DrawLine(TopRight, SelectionEnd, SelectionBoxThickness, SelectionBoxColor);
 		Canvas->K2_DrawLine(SelectionEnd, BottomLeft, SelectionBoxThickness, SelectionBoxColor);
@@ -66,41 +112,190 @@ void ARTSHUD::DrawSelectionBox_Implementation(const FVector2D& StartPoint, const
 	}
 }
 
+#include "RTSSelectionSubsystem.h"
+
 // Default implementation of PerformSelection. Selects actors within the selection box.
 void ARTSHUD::PerformSelection_Implementation()
 {
-	// Array to store actors that are within the selection rectangle.
-	TArray<AActor*> SelectedActors;
-	GetActorsInSelectionRectangle<AActor>(SelectionStart, SelectionEnd, SelectedActors, false, false);
+	// 1. Determine Selection Constraints & Modifier
+	bool bCanSelectActors = true;
+	bool bCanSelectMass = true;
+	ERTSSelectionModifier Modifier = ERTSSelectionModifier::Replace;
 
-	// Filter for Selectable Actors
-	TArray<AActor*> ValidSelectableActors;
-	for (AActor* Actor : SelectedActors)
+	URTSSelectionSubsystem* SelectionSubsystem = nullptr;
+	URTSSelector* SelectorComponent = nullptr;
+
+	APlayerController* PC = GetOwningPlayerController();
+	if (PC)
 	{
-		if (Actor && Actor->FindComponentByClass<URTSSelectable>())
+		// Find Components/Subsystems
+		SelectorComponent = PC->FindComponentByClass<URTSSelector>();
+		if (const ULocalPlayer* LP = PC->GetLocalPlayer())
 		{
-			ValidSelectableActors.Add(Actor);
+			SelectionSubsystem = LP->GetSubsystem<URTSSelectionSubsystem>();
+		}
+
+		// Check Input Modifier (Shift = Add)
+		if (PC->IsInputKeyDown(EKeys::LeftShift) || PC->IsInputKeyDown(EKeys::RightShift))
+		{
+			Modifier = ERTSSelectionModifier::Add;
+
+			// "Type Consistency" Logic:
+			// If we are ADDING to selection, we restrict new selection to match existing type.
+			if (SelectionSubsystem)
+			{
+				if (SelectionSubsystem->HasSelectedActors())
+				{
+					bCanSelectMass = false; // Already have Actors -> Don't add Mass
+				}
+				else if (SelectionSubsystem->HasSelectedMass())
+				{
+					bCanSelectActors = false; // Already have Mass -> Don't add Actors
+				}
+			}
 		}
 	}
 
-	// Find the URTSSelector component and pass the selected actors to it.
-	if (const auto PC = GetOwningPlayerController())
+	// 2. Perform Actor Selection (if allowed)
+	TArray<AActor*> FinalActorSelection;
+	
+	if (bCanSelectActors)
 	{
-		if (const auto SelectorComponent = PC->FindComponentByClass<URTSSelector>())
+		TArray<AActor*> RawActors;
+		GetActorsInSelectionRectangle<AActor>(SelectionStart, SelectionEnd, RawActors, false, false);
+
+		// Filter for Selectable
+		for (AActor* Actor : RawActors)
 		{
-			if (ValidSelectableActors.Num() > 0)
+			if (Actor && Actor->FindComponentByClass<URTSSelectable>())
 			{
-				UE_LOG(LogTemp, Log, TEXT("RTSHUD: Found %d Selectable Actors, skipping Mass selection."), ValidSelectableActors.Num());
-				SelectorComponent->HandleSelectedActors(ValidSelectableActors);
-			}
-			else
-			{
-				UE_LOG(LogTemp, Log, TEXT("RTSHUD: No Selectable Actors found, attempting Mass selection."));
-				// Clear previous selection and try MassBattle selection
-				SelectorComponent->HandleSelectedActors(TArray<AActor*>());
-				PerformMassSelection();
+				FinalActorSelection.Add(Actor);
 			}
 		}
+	}
+
+	// 3. Perform Mass Selection (Fallback logic: Only if No Actors found AND Mass is allowed)
+	TArray<FEntityHandle> FinalMassSelection;
+	bool bActorsFound = FinalActorSelection.Num() > 0;
+
+	if (!bActorsFound && bCanSelectMass)
+	{
+		// Only attempt Mass select if we didn't Pick Actors (Priority) AND Mass is allowed (Consistency)
+		PerformMassSelection(FinalMassSelection);
+	}
+
+	// 4. Toggle Logic (Shift + Single Click = Deselect)
+	// 4. Toggle Logic (Shift + Single Click = Deselect)
+	// ONLY apply toggle if this was a Click (not a Box Drag).
+	// Threshold: MinSelectionSizeSq (Synced with Visuals).
+	float DragDistSq = FVector2D::DistSquared(SelectionStart, SelectionEnd);
+	
+	if (Modifier == ERTSSelectionModifier::Add && SelectionSubsystem)
+	{
+		UE_LOG(LogTemp, Log, TEXT("RTSHUD: Shift Action - DragDistSq: %f (Threshold: %f)"), DragDistSq, MinSelectionSizeSq);
+		
+		if (DragDistSq <= MinSelectionSizeSq)
+		{
+			// Case A: Single Actor Toggle
+			if (FinalActorSelection.Num() == 1 && FinalMassSelection.Num() == 0)
+			{
+				if (SelectionSubsystem->IsActorSelected(FinalActorSelection[0]))
+				{
+					Modifier = ERTSSelectionModifier::Remove;
+					UE_LOG(LogTemp, Log, TEXT("RTSHUD: Toggling Single Actor OFF (Remove)."));
+				}
+			}
+			// Case B: Single Mass Entity Toggle
+			else if (FinalActorSelection.Num() == 0 && FinalMassSelection.Num() == 1)
+			{
+				if (SelectionSubsystem->IsEntitySelected(FinalMassSelection[0]))
+				{
+					Modifier = ERTSSelectionModifier::Remove;
+					UE_LOG(LogTemp, Log, TEXT("RTSHUD: Toggling Single Entity OFF (Remove)."));
+				}
+			}
+		}
+	}
+
+	// 5. Ctrl + Click (Select All of Same Type On Screen)
+	if (PC && (PC->IsInputKeyDown(EKeys::LeftControl) || PC->IsInputKeyDown(EKeys::RightControl)))
+	{
+		// Only apply if it was a Click (not a Box Drag)
+		if (DragDistSq <= MinSelectionSizeSq)
+		{
+			// Strategy: If we clicked a single unit, find all matching units on screen.
+			
+			// 1. Actor Group Selection
+			if (FinalActorSelection.Num() == 1)
+			{
+				AActor* TemplateActor = FinalActorSelection[0];
+				if (TemplateActor)
+				{
+					UClass* MatchClass = TemplateActor->GetClass();
+					
+					// Get Viewport Size
+					int32 ViewportX, ViewportY;
+					PC->GetViewportSize(ViewportX, ViewportY);
+					
+					// Select All in Viewport
+					TArray<AActor*> AllScreenActors;
+					GetActorsInSelectionRectangle<AActor>(FVector2D(0,0), FVector2D(ViewportX, ViewportY), AllScreenActors, false, false);
+					
+					// Filter by Class
+					FinalActorSelection.Reset();
+					for(AActor* Act : AllScreenActors)
+					{
+						if (Act && Act->GetClass() == MatchClass && Act->FindComponentByClass<URTSSelectable>())
+						{
+							FinalActorSelection.Add(Act);
+						}
+					}
+					
+					// Force Replace Mode for Group Select
+					Modifier = ERTSSelectionModifier::Replace;
+					// Clear Mass (prioritize Actor group)
+					FinalMassSelection.Reset();
+				}
+			}
+			// 2. Mass Entity Group Selection (Future TODO if specific Mass types needed)
+			else if (FinalMassSelection.Num() > 0)
+			{
+				// For Mass, we might need to check Archetype or Entity Config traits.
+				// For now, if we Ctrl+Click a Mass unit, we might select ALL Mass units on screen?
+				// Simplistic implementation: Select ALL valid Mass implementation if we clicked one.
+				
+				// Re-run PerformMassSelection with Full Screen?
+				// Note: Mass selection is expensive. Let's stick to Actor logic first as requested.
+			}
+		}
+	}
+
+	// 6. Update Visuals & Subsystem
+	
+	// Visual Highlighting (Actors)
+	if (SelectorComponent)
+	{
+		if (bActorsFound)
+		{
+			UE_LOG(LogTemp, Log, TEXT("RTSHUD: Found %d Selectable Actors."), FinalActorSelection.Num());
+			SelectorComponent->HandleSelectedActors(FinalActorSelection);
+		}
+		else
+		{
+			// Clear Actor visuals (we either found nothing or found Mass)
+			SelectorComponent->HandleSelectedActors(TArray<AActor*>());
+			
+			if (FinalMassSelection.Num() > 0)
+			{
+				UE_LOG(LogTemp, Log, TEXT("RTSHUD: Selected %d Mass Entities."), FinalMassSelection.Num());
+			}
+		}
+	}
+	
+	// Update Data Store
+	if (SelectionSubsystem)
+	{
+		SelectionSubsystem->SetSelectedUnits(FinalActorSelection, FinalMassSelection, Modifier);
 	}
 
 	bIsPerformingSelection = false;
@@ -109,8 +304,10 @@ void ARTSHUD::PerformSelection_Implementation()
 #include "MassBattleFuncLib.h"
 #include "MassBattleStructs.h"
 
-void ARTSHUD::PerformMassSelection()
+void ARTSHUD::PerformMassSelection(TArray<FEntityHandle>& OutEntities)
 {
+	OutEntities.Reset();
+	
 	APlayerController* PC = GetOwningPlayerController();
 	if (!PC || !PC->PlayerCameraManager) return;
 
@@ -159,7 +356,9 @@ void ARTSHUD::PerformMassSelection()
 			UE_LOG(LogTemp, Log, TEXT("RTSHUD: Selected %d Mass Entities"), Results.Num());
 			for (const FTraceResult& Result : Results)
 			{
-				UE_LOG(LogTemp, Log, TEXT("  - Entity Index: %d"), Result.Entity.Index);
+				OutEntities.Add(Result.Entity);
+				// Log abbreviated
+				// UE_LOG(LogTemp, Log, TEXT("  - Entity Index: %d"), Result.Entity.Index);
 			}
 		}
 		else

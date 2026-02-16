@@ -19,6 +19,12 @@ public:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Selection Box")
 	float SelectionBoxThickness;
 
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Selection Box")
+	FLinearColor SelectionBoxFillColor;
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Selection Box")
+	float MinSelectionSizeSq;
+
 	UFUNCTION(BlueprintCallable, Category = "Selection Box")
 	void BeginSelection(const FVector2D& StartPoint);
 
@@ -38,7 +44,7 @@ protected:
 	virtual void DrawHUD() override;
 
 private:
-	void PerformMassSelection();
+	void PerformMassSelection(TArray<struct FEntityHandle>& OutEntities);
 
 	bool bIsDrawingSelectionBox;
 	bool bIsPerformingSelection;
