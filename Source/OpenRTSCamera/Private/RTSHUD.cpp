@@ -6,6 +6,8 @@
 #include "Engine/Canvas.h"
 #include "LandmarkSubsystem.h"
 #include "LandmarkTypes.h"
+#include "Engine/Texture2D.h" // Added for FCanvasTextItem if needed, though GEngine->GetLargeFont() is used.
+#include "GameFramework/PlayerController.h" // Added for GetOwningPlayerController() if not already included implicitly.
 
 // Constructor implementation: Initializes default values.
 ARTSHUD::ARTSHUD()
@@ -17,6 +19,9 @@ ARTSHUD::ARTSHUD()
 	bIsDrawingSelectionBox = false;
 	bIsPerformingSelection = false;
 }
+
+// Forward declaration for the new function
+void ARTSHUD::DrawLandmarks();
 
 // Implementation of the DrawHUD function. It's called every frame to draw the HUD.
 void ARTSHUD::DrawHUD()
