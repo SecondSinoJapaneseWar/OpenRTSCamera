@@ -40,7 +40,8 @@ public class OpenRTSCamera : ModuleRules
 				"MassBattleMinimap",
 				"MassBattle",
 				"MassAPI",
-				"MassEntity"
+				"MassEntity",
+				"LandmarkSystem"
 			}
 		);
 

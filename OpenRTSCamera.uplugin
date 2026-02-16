@@ -30,6 +30,10 @@
 		{
 			"Name": "MassBattleMinimap",
 			"Enabled": true
+		},
+		{
+			"Name": "LandmarkSystem",
+			"Enabled": true
 		}
 	],
 	"SupportURL": "https://github.com/HeyZoos/OpenRTSCamera/issues",
