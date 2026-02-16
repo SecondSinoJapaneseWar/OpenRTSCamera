@@ -20,9 +20,6 @@ ARTSHUD::ARTSHUD()
 	bIsPerformingSelection = false;
 }
 
-// Forward declaration for the new function
-void ARTSHUD::DrawLandmarks();
-
 // Implementation of the DrawHUD function. It's called every frame to draw the HUD.
 void ARTSHUD::DrawHUD()
 {
@@ -37,7 +34,6 @@ void ARTSHUD::DrawHUD()
 		}
 	}
 
-	// Perform selection actions if required.
 	// Perform selection actions if required.
 	if (bIsPerformingSelection)
 	{
@@ -57,63 +53,18 @@ void ARTSHUD::DrawHUD()
 				PC->GetPlayerViewPoint(CamLoc, CamRot);
 
 				// specific logic for OpenRTSCamera: Height is usually Z.
-				// Map Zoom 0.0 (Close, e.g. 500) to 1.0 (Far, e.g. 8000)
-				// Adjust these min/max values to fit your game's actual zoom range.
 				const float MinHeight = 500.0f;
 				const float MaxHeight = 10000.0f;
 				float ZoomFactor = FMath::Clamp((CamLoc.Z - MinHeight) / (MaxHeight - MinHeight), 0.0f, 1.0f);
 
 				// 2. Update Subsystem
-				// Note: FOV 90 is placeholder, get actul FOV if possible
 				LandmarkSys->UpdateCameraState(CamLoc, CamRot, 90.0f, ZoomFactor);
 
-				// 3. Get Draw Data
-				TArray<FLandmarkInstanceData> VisibleLandmarks;
-				TArray<FVector2D> ScreenPositions;
-				TArray<float> Scales;
-				TArray<float> Alphas;
-				LandmarkSys->GetVisibleLandmarks(VisibleLandmarks, ScreenPositions, Scales, Alphas);
-
-				// 4. Draw
-				for (int32 i = 0; i < VisibleLandmarks.Num(); ++i)
-				{
-					if (i >= ScreenPositions.Num()) break;
-
-					const FLandmarkInstanceData& Data = VisibleLandmarks[i];
-					const FVector2D& ScreenPos = ScreenPositions[i];
-					const float Scale = Scales[i];
-					const float Alpha = Alphas[i];
-
-					if (Alpha <= 0.01f) continue;
-					
-					FString TextToDraw = Data.DisplayName.ToString();
-					if (TextToDraw.IsEmpty()) TextToDraw = Data.ID;
-
-					// Simple Text Draw
-					// For better quality, use a specific Font asset (Sdf font) if available.
-					// Since we don't have a Font reference in RTSHUD yet, using default small font or GEngine font.
-					
-					// Setup Color with Alpha
-					FLinearColor DrawColor = Data.VisualConfig.Color;
-					DrawColor.A = Alpha;
-
-					// Center text
-					float TextW, TextH;
-					Canvas->StrLen(GEngine->GetSmallFont(), TextToDraw, TextW, TextH);
-					
-					// Apply Scale to Text Size? Canvas->DrawText doesn't scale font easily without a Scaled Font.
-					// Workaround: Use Canvas->K2_DrawText with scale if exposed, or strictly standard DrawText.
-					// Standard DrawText doesn't support Scale param directly on the Font object unless we have different font sizes.
-					// However, we can just change the color for now. 
-					// For "Refined" look, we usually need Slate or a UMG widget projected. 
-					// But raw Canvas is fast.
-					
-					Canvas->DrawText(GEngine->GetMediumFont(), TextToDraw, ScreenPos.X - (TextW * 0.5f), ScreenPos.Y - (TextH * 0.5f), 1.0f + (Scale - 1.0f) * 0.5f, 1.0f + (Scale - 1.0f) * 0.5f, FFontRenderInfo());
-                    // Note: DrawText with scale params requires specific overload or engine version features, checking signature...
-                    // FCanvasTextItem is the lower level way. 
-                    // Let's stick to basic DrawText for now. The Scale param might not exist in simple DrawText in all versions.
-                    // Actually UCanvas::DrawText(UFont* InFont, const FString& InText, float X, float Y, float XScale, float YScale, const FFontRenderInfo& RenderInfo)
-				}
+				// 3. Delegate Drawing to Subsystem (It handles the HUD layer for landmarks)
+                if (Canvas)
+                {
+                    LandmarkSys->DrawLandmarks(Canvas);
+                }
 			}
 		}
 	}

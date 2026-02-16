@@ -44,9 +44,6 @@ protected:
 	/** Draw the selection box */
 	void DrawSelectionMarquee();
 
-    /** Draw Landmark System labels */
-    void DrawLandmarks();
-
 	virtual void DrawHUD() override;
 
 private:
