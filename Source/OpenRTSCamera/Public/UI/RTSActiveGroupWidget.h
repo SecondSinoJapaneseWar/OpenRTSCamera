@@ -23,7 +23,7 @@ protected:
 	virtual void NativeConstruct() override;
 
 	UFUNCTION()
-	void OnSelectionUpdated(const FRTSSelectionView& View);
+	virtual void OnSelectionUpdated(const FRTSSelectionView& View);
 
 	// Optional: If bound, we forward the data to this internal widget.
 	// This allows users to wrap our logic in a text/border/etc.

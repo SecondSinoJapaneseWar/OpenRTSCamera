@@ -41,7 +41,9 @@ public class OpenRTSCamera : ModuleRules
 				"MassBattle",
 				"MassAPI",
 				"MassEntity",
-				"LandmarkSystem"
+				"LandmarkSystem",
+				"GameplayTags",
+				"RTSCommandSystem"
 			}
 		);
 

@@ -93,6 +93,15 @@ void URTSSelector::CollectComponentDependencyReferences()
 	{
 		this->PlayerController = PlayerControllerRef;
 		this->HUD = Cast<ARTSHUD>(PlayerControllerRef->GetHUD());
+		if (this->HUD)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[RTSSelector] HUD found OK: %s"), *this->HUD->GetClass()->GetName());
+		}
+		else
+		{
+			UE_LOG(LogTemp, Error, TEXT("[RTSSelector] HUD cast FAILED! PC HUD class is: %s"),
+				PlayerControllerRef->GetHUD() ? *PlayerControllerRef->GetHUD()->GetClass()->GetName() : TEXT("NULL"));
+		}
 	}
 	else
 	{

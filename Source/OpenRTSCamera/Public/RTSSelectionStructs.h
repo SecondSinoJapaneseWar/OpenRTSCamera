@@ -66,6 +66,7 @@ struct FRTSUnitData
 	UPROPERTY()
 	FEntityHandle EntityHandle;
 
+
 	// Default constructor for "Empty/Unknown" state
 	FRTSUnitData()
 	{
@@ -83,6 +84,7 @@ struct FRTSSelectionView
 
 	UPROPERTY(BlueprintReadOnly, Category = "RTS Selection")
 	ERTSSelectionMode Mode = ERTSSelectionMode::Single;
+
 
 	// Used when Mode == Single. Contains detailed info.
 	UPROPERTY(BlueprintReadOnly, Category = "RTS Selection")

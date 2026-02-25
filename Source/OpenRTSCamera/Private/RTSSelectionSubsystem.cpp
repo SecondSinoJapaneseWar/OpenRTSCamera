@@ -1,15 +1,67 @@
-// Copyright 2024 Winy unq All Rights Reserved.
-
 #include "RTSSelectionSubsystem.h"
 #include "RTSSelectable.h"
+#include "RTSCommandSubsystem.h"
 #include "MassEntitySubsystem.h"
 #include "MassEntityManager.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "Interfaces/RTSCommandInterface.h"
+#include "LandmarkSubsystem.h"
+#include "Data/RTSCommandGridAsset.h"
+#include "Data/RTSCommandButton.h"
+#include "GameplayTagsManager.h"
+#include "Components/MassBattleAgentComponent.h"
+#include "Fragments/SubType.h"
+
+DEFINE_LOG_CATEGORY(LogORTSSelection);
 
 void URTSSelectionSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
+
+    if (ULocalPlayer* LP = GetLocalPlayer())
+    {
+        if (URTSCommandSubsystem* SignalHub = LP->GetSubsystem<URTSCommandSubsystem>())
+        {
+            SignalHub->OnCommandIssued.AddLambda([this](FGameplayTag Tag, AActor* Context)
+            {
+                this->IssueCommand(Tag);
+            });
+        }
+    }
+
+    // C++ Auto-Config Grid (Transitent)
+    // If no grid is provided, we create a default one with Move, Attack, Stop, Hold, Patrol
+    if (DefaultEntityGrid.IsNull())
+    {
+        UE_LOG(LogORTSSelection, Log, TEXT("Selection: Auto-configuring transient default grid."));
+        URTSCommandGridAsset* TransientGrid = NewObject<URTSCommandGridAsset>(this, TEXT("TransientDefaultGrid"));
+        
+        auto AddGenericBtn = [&](FString TagName, FString Name, int32 Index) {
+            URTSCommandButton* Btn = NewObject<URTSCommandButton>(TransientGrid);
+            Btn->CommandTag = FGameplayTag::RequestGameplayTag(FName(*TagName));
+            Btn->DisplayName = FText::FromString(Name);
+            Btn->PreferredIndex = Index;
+            TransientGrid->Buttons.Add(Btn);
+
+            // Ensure tag is registered natively to prevent warnings
+            UGameplayTagsManager::Get().AddNativeGameplayTag(FName(*TagName), FString::Printf(TEXT("Default command %s"), *Name));
+        };
+
+        static bool bTagsRegistered = false;
+        if (!bTagsRegistered)
+        {
+            AddGenericBtn(TEXT("RTS.Command.Move"), TEXT("移动"), 0);
+            AddGenericBtn(TEXT("RTS.Command.Attack"), TEXT("攻击"), 1);
+            AddGenericBtn(TEXT("RTS.Command.Stop"), TEXT("停止"), 2);
+            AddGenericBtn(TEXT("RTS.Command.Hold"), TEXT("保持"), 3);
+            AddGenericBtn(TEXT("RTS.Command.Patrol"), TEXT("巡逻"), 4);
+            bTagsRegistered = true;
+        }
+
+        DefaultEntityGrid = TransientGrid;
+        DefaultGridNative = TransientGrid; // Keep it alive and accessible
+    }
 }
 
 void URTSSelectionSubsystem::Deinitialize()
@@ -17,42 +69,44 @@ void URTSSelectionSubsystem::Deinitialize()
 	Super::Deinitialize();
 }
 
-// Note: In header, bKeepIndex defaults to false. In CPP, we don't repeat the default value.
 void URTSSelectionSubsystem::SetSelectedUnits(const TArray<AActor*>& InActors, const TArray<FEntityHandle>& InEntities, ERTSSelectionModifier Modifier)
 {
-	// 1. Update Internal State based on Modifier
+    TArray<AActor*> FinalActors = InActors;
+    TArray<FEntityHandle> FinalEntities = InEntities;
+
+    // Strategic Resolution: Convert Actors to Entities if they are Proxies
+    for (int32 i = FinalActors.Num() - 1; i >= 0; i--)
+    {
+        AActor* Actor = FinalActors[i];
+        if (Actor)
+        {
+            if (UMassBattleAgentComponent* MassAgent = Actor->FindComponentByClass<UMassBattleAgentComponent>())
+            {
+                FEntityHandle ProxiedEntity = MassAgent->GetEntityHandle();
+                if (ProxiedEntity.Index != 0)
+                {
+                    FinalEntities.AddUnique(ProxiedEntity);
+                    FinalActors.RemoveAt(i);
+                }
+            }
+        }
+    }
+
+	// 1. Update Internal State
 	if (Modifier == ERTSSelectionModifier::Replace)
 	{
-		SelectedActors = InActors;
-		SelectedEntities = InEntities;
+		SelectedActors = FinalActors;
+		SelectedEntities = FinalEntities;
 	}
 	else if (Modifier == ERTSSelectionModifier::Add)
 	{
-		// Append Actors (Unique)
-		for (AActor* Actor : InActors)
-		{
-			SelectedActors.AddUnique(Actor);
-		}
-		
-		// Append Entities (Unique)
-		for (const FEntityHandle& Handle : InEntities)
-		{
-			SelectedEntities.AddUnique(Handle);
-		}
+		for (AActor* Actor : FinalActors) SelectedActors.AddUnique(Actor);
+		for (const FEntityHandle& Handle : FinalEntities) SelectedEntities.AddUnique(Handle);
 	}
 	else if (Modifier == ERTSSelectionModifier::Remove)
 	{
-		// Remove Actors
-		for (AActor* Actor : InActors)
-		{
-			SelectedActors.Remove(Actor);
-		}
-
-		// Remove Entities
-		for (const FEntityHandle& Handle : InEntities)
-		{
-			SelectedEntities.Remove(Handle);
-		}
+		for (AActor* Actor : FinalActors) SelectedActors.Remove(Actor);
+		for (const FEntityHandle& Handle : FinalEntities) SelectedEntities.Remove(Handle);
 	}
 
 	// 2. Generate View Data
@@ -66,47 +120,28 @@ void URTSSelectionSubsystem::SetSelectedUnits(const TArray<AActor*>& InActors, c
 	else if (TotalCount == 1)
 	{
 		View.Mode = ERTSSelectionMode::Single;
-		if (SelectedActors.Num() > 0)
-		{
-			View.SingleUnit = CreateUnitDataFromActor(SelectedActors[0]);
-			View.Items.Add(View.SingleUnit);
-		}
-		else
-		{
-			View.SingleUnit = CreateUnitDataFromEntity(SelectedEntities[0]);
-			View.Items.Add(View.SingleUnit);
-		}
+		if (SelectedActors.Num() > 0) View.SingleUnit = CreateUnitDataFromActor(SelectedActors[0]);
+		else View.SingleUnit = CreateUnitDataFromEntity(SelectedEntities[0]);
+        View.Items.Add(View.SingleUnit);
 	}
 	else if (TotalCount <= ListModeMaxCount)
 	{
 		View.Mode = ERTSSelectionMode::List;
-		
-		for (AActor* Actor : SelectedActors)
-		{
-			View.Items.Add(CreateUnitDataFromActor(Actor));
-		}
-		
-		for (const FEntityHandle& Handle : SelectedEntities)
-		{
-			View.Items.Add(CreateUnitDataFromEntity(Handle));
-		}
+		for (AActor* Actor : SelectedActors) View.Items.Add(CreateUnitDataFromActor(Actor));
+		for (const FEntityHandle& Handle : SelectedEntities) View.Items.Add(CreateUnitDataFromEntity(Handle));
+		// 按类型名排序，保证同类型单位连续显示
+		View.Items.Sort([](const FRTSUnitData& A, const FRTSUnitData& B){ return A.Name < B.Name; });
 	}
 	else
 	{
 		View.Mode = ERTSSelectionMode::Summary;
-		
-		// Map for grouping: TypeName -> GroupData
 		TMap<FString, FRTSUnitData> GroupMap;
 
 		for (AActor* Actor : SelectedActors)
 		{
 			FRTSUnitData Data = CreateUnitDataFromActor(Actor);
 			FRTSUnitData& Group = GroupMap.FindOrAdd(Data.Name);
-			if (Group.Count == 0 || Group.Name.IsEmpty())
-			{
-				Group = Data;
-				Group.Count = 0;
-			}
+			if (Group.Count == 0 || Group.Name.IsEmpty()) { Group = Data; Group.Count = 0; }
 			Group.Count++;
 		}
 
@@ -114,111 +149,94 @@ void URTSSelectionSubsystem::SetSelectedUnits(const TArray<AActor*>& InActors, c
 		{
 			FRTSUnitData Data = CreateUnitDataFromEntity(Handle);
 			FRTSUnitData& Group = GroupMap.FindOrAdd(Data.Name);
-			if (Group.Count == 0 || Group.Name.IsEmpty())
-			{
-				Group = Data;
-				Group.Count = 0;
-			}
+			if (Group.Count == 0 || Group.Name.IsEmpty()) { Group = Data; Group.Count = 0; }
 			Group.Count++;
 		}
 
-		for (auto& Pair : GroupMap)
-		{
-			View.Items.Add(Pair.Value);
-		}
+		for (auto& Pair : GroupMap) View.Items.Add(Pair.Value);
+		// Summary 模式：按类型名字母排序，保证 City1→City2→... MassUnit_SubType0→... 依次连续
+		View.Items.Sort([](const FRTSUnitData& A, const FRTSUnitData& B){ return A.Name < B.Name; });
 	}
 
-	// --- Tab Cycling Logic ---
+	// --- Tab Cycling ---
 	AvailableGroupKeys.Reset();
-	for(const auto& Item : View.Items)
-	{
-		AvailableGroupKeys.AddUnique(Item.Name);
-	}
+	for(const auto& Item : View.Items) AvailableGroupKeys.AddUnique(Item.Name);
 	AvailableGroupKeys.Sort();
 
-	// Validate CurrentGroupIndex
-	if (CurrentGroupIndex >= AvailableGroupKeys.Num()) 
-	{
-		CurrentGroupIndex = 0;
-	}
+	if (CurrentGroupIndex >= AvailableGroupKeys.Num()) CurrentGroupIndex = 0;
+	if (AvailableGroupKeys.IsValidIndex(CurrentGroupIndex)) View.ActiveGroupKey = AvailableGroupKeys[CurrentGroupIndex];
 
-	if (AvailableGroupKeys.IsValidIndex(CurrentGroupIndex))
-	{
-		View.ActiveGroupKey = AvailableGroupKeys[CurrentGroupIndex];
-	}
-
-	// Broadcast
 	OnSelectionChanged.Broadcast(View);
+
+    // --- Grid Synchronization ---
+    // 核心设计：ActiveGroupKey 就是 TypeName（如 "City1", "MassUnit_SubType0"）
+    // 直接用它查 Grid 表，不绕路遍历实体句柄
+    URTSCommandGridAsset* NewGrid = nullptr;
+    const FString& ActiveKey = View.ActiveGroupKey;
+
+    if (!ActiveKey.IsEmpty())
+    {
+        // 路径A: Actor 组 —— 在选中 Actor 里找 ActiveKey 对应的 Actor，取其 Grid
+        for (AActor* Actor : SelectedActors)
+        {
+            if (Actor && Actor->GetClass()->GetDisplayNameText().ToString() == ActiveKey
+                && Actor->Implements<URTSCommandInterface>())
+            {
+                NewGrid = IRTSCommandInterface::Execute_GetCommandGrid(Actor);
+                break;
+            }
+        }
+
+        // 路径B: Entity 组 —— ActiveKey 就是 TypeName（City1/MassUnit_SubType0/...）
+        // 直接查 LandmarkSubsystem 的 TypeGridAssets 表
+        if (!NewGrid)
+        {
+            UWorld* World = GetWorld();
+            ULandmarkSubsystem* LandmarkSub = World ? World->GetSubsystem<ULandmarkSubsystem>() : nullptr;
+            if (LandmarkSub)
+            {
+                NewGrid = LandmarkSub->GetGridByType(ActiveKey);
+            }
+        }
+    }
+
+    // 路径C: 兜底默认 Grid（士兵移动/攻击/停止）
+    if (!NewGrid && !DefaultEntityGrid.IsNull() && (SelectedActors.Num() > 0 || SelectedEntities.Num() > 0))
+    {
+        NewGrid = DefaultEntityGrid.LoadSynchronous();
+    }
+
+    OnCommandNavigationRequested.Broadcast(NewGrid);
+    UE_LOG(LogORTSSelection, Log, TEXT("Selection: Modifier=%d Actors=%d Entities=%d ActiveKey=%s Grid=>%s"),
+        (int32)Modifier, SelectedActors.Num(), SelectedEntities.Num(),
+        *ActiveKey, NewGrid ? *NewGrid->GetName() : TEXT("NULL"));
 }
+
 
 void URTSSelectionSubsystem::ClearSelection()
 {
-	SetSelectedUnits(TArray<AActor*>(), TArray<FEntityHandle>());
+	SetSelectedUnits(TArray<AActor*>(), TArray<FEntityHandle>(), ERTSSelectionModifier::Replace);
 }
-
-// --- New Starcraft-style Controls ---
 
 void URTSSelectionSubsystem::CycleGroup()
 {
 	if (AvailableGroupKeys.Num() <= 1) return;
 
 	CurrentGroupIndex++;
-	if (CurrentGroupIndex >= AvailableGroupKeys.Num())
-	{
-		CurrentGroupIndex = 0;
-	}
-
-	// Force Re-Generate View (Copying logic from SetSelectedUnits Step 2 for now)
-	// ideally this should be a helper function
-	
-	// Re-run SetSelectedUnits with "Replace" effectively regenerates view, but it's expensive to copy arrays.
-	// But since we can't easily add private methods to header without re-viewing, 
-	// we will trigger a self-refresh using current selection.
+	if (CurrentGroupIndex >= AvailableGroupKeys.Num()) CurrentGroupIndex = 0;
 	SetSelectedUnits(SelectedActors, SelectedEntities, ERTSSelectionModifier::Replace);
 }
 
 void URTSSelectionSubsystem::RemoveUnit(const FRTSUnitData& UnitData)
 {
-	// 1. Identify what to remove
 	TArray<AActor*> ActorsToRemove;
 	TArray<FEntityHandle> EntitiesToRemove;
 
-	// Check if this is a "Group" removal (Summary Mode) or "Single" removal
-	// In our data, if Element is from Summary, it might represent multiple.
-	// But FRTSUnitData passed from UI is just a copy.
-	// We check if we are in Summary Mode? 
-	// Or simplistic approach: If UnitData has valid pointers, remove specific. 
-	// If UnitData is a Summary representative (pointers might be null or first-of-group),
-	// we might need to remove by Name.
-	
-	bool bIsGroupRemoval = false;
-	// Check ID match in SelectedActors.
-	
-	if (UnitData.ActorPtr)
-	{
-		ActorsToRemove.Add(UnitData.ActorPtr);
-	}
-	else if (UnitData.EntityHandle.Index > 0)
-	{
-		EntitiesToRemove.Add(UnitData.EntityHandle);
-	}
+	if (UnitData.ActorPtr) ActorsToRemove.Add(UnitData.ActorPtr);
+	else if (UnitData.EntityHandle.Index != 0) EntitiesToRemove.Add(UnitData.EntityHandle);
 	else
 	{
-		// Fallback: Remove by Name (Type) if pointers missing (unlikely in List, possible in Summary?)
-		// Actually, let's enable "Remove Type" if user held Shift on a Summary Icon.
-		// For now, assume List Mode (Starcraft Wireframe).
-		// If Summary Mode, we should probably iterate all Selected and remove matching Name.
-		bIsGroupRemoval = true;
-	}
-
-	if (bIsGroupRemoval)
-	{
-		// Iterate and collect all matching Name
-		for (AActor* Act : SelectedActors)
-		{
-			if (Act && Act->GetName() == UnitData.Name) ActorsToRemove.Add(Act); // Name match might need refinement
-		}
-		// Entities...
+		for (AActor* Act : SelectedActors) if (Act && Act->GetClass()->GetDisplayNameText().ToString() == UnitData.Name) ActorsToRemove.Add(Act);
 	}
 
 	SetSelectedUnits(ActorsToRemove, EntitiesToRemove, ERTSSelectionModifier::Remove);
@@ -226,35 +244,16 @@ void URTSSelectionSubsystem::RemoveUnit(const FRTSUnitData& UnitData)
 
 void URTSSelectionSubsystem::SelectGroup(const FString& GroupKey)
 {
-	// Filter Current Selection to ONLY keep this GroupKey
 	TArray<AActor*> NewActors;
 	TArray<FEntityHandle> NewEntities;
 
-	// Filter Actors
-	for (AActor* Act : SelectedActors)
-	{
-		if (Act)
-		{
-			// We need to match the key logic used in CreateUnitData
-			FRTSUnitData Data = CreateUnitDataFromActor(Act);
-			if (Data.Name == GroupKey)
-			{
-				NewActors.Add(Act);
-			}
-		}
-	}
+	for (AActor* Act : SelectedActors) if (Act && Act->GetClass()->GetDisplayNameText().ToString() == GroupKey) NewActors.Add(Act);
+	for (const FEntityHandle& Handle : SelectedEntities) 
+    {
+        FRTSUnitData Data = CreateUnitDataFromEntity(Handle);
+        if (Data.Name == GroupKey) NewEntities.Add(Handle);
+    }
 
-	// Filter Entities
-	for (const FEntityHandle& Handle : SelectedEntities)
-	{
-		FRTSUnitData Data = CreateUnitDataFromEntity(Handle);
-		if (Data.Name == GroupKey)
-		{
-			NewEntities.Add(Handle);
-		}
-	}
-
-	// Apply as Replace
 	SetSelectedUnits(NewActors, NewEntities, ERTSSelectionModifier::Replace);
 }
 
@@ -263,14 +262,10 @@ FRTSUnitData URTSSelectionSubsystem::CreateUnitDataFromActor(AActor* Actor)
 	FRTSUnitData Data;
 	if (Actor)
 	{
-		// Group by Class Name (Type) instead of Instance Name (Label)
 		Data.Name = Actor->GetClass()->GetDisplayNameText().ToString(); 
-		// Or GetName() + Remove _C? DisplayName is usually cleaner for UI.
-		
 		Data.ActorPtr = Actor;
 		Data.bIsMassEntity = false;
 		
-		// Retrieve Data from Component
 		if (auto Selectable = Actor->FindComponentByClass<URTSSelectable>())
 		{
 			Data.Icon = Selectable->Icon;
@@ -291,12 +286,112 @@ FRTSUnitData URTSSelectionSubsystem::CreateUnitDataFromEntity(const FEntityHandl
 	Data.bIsMassEntity = true;
 	Data.EntityHandle = Handle;
 
-	// Default fallback
-	Data.Name = TEXT("Mass Unit");
+    UWorld* World = GetWorld();
+    if (!World) return Data;
 
-	// TODO: Use MassEntityManager to get fragments (Icon, Health, etc.)
-	// UMassEntitySubsystem* MassSubsystem = GetWorld()->GetSubsystem<UMassEntitySubsystem>();
-	// if (MassSubsystem) { FMassEntityManager& EntityManager = MassSubsystem->GetMutableEntityManager(); ... }
+    // 路径1: 城市实体 —— 从 LandmarkSubsystem 反查类型名（City1~City5）用于分组
+    if (ULandmarkSubsystem* LandmarkSub = World->GetSubsystem<ULandmarkSubsystem>())
+    {
+        FString EntityType = LandmarkSub->FindTypeByEntity(Handle);
+        if (!EntityType.IsEmpty())
+        {
+            Data.Name = EntityType; // "City1", "City2" ...
+            return Data;
+        }
+    }
 
+    // 路径2: 普通 Mass 单位 —— 读取 FSubType.Index 作为分组 Key
+    if (UMassEntitySubsystem* MassSys = World->GetSubsystem<UMassEntitySubsystem>())
+    {
+        FMassEntityManager& EM = MassSys->GetMutableEntityManager();
+        if (Handle.Index > 0)
+        {
+            FMassEntityHandle NativeHandle(Handle.Index, Handle.Serial);
+            if (EM.IsEntityActive(NativeHandle))
+            {
+                if (const FSubType* SubFrag = EM.GetFragmentDataPtr<FSubType>(NativeHandle))
+                {
+                    Data.Name = FString::Printf(TEXT("MassUnit_SubType%d"), SubFrag->Index);
+                    return Data;
+                }
+            }
+        }
+    }
+
+    Data.Name = TEXT("Mass Unit");
 	return Data;
+}
+
+
+void URTSSelectionSubsystem::IssueCommand(FGameplayTag CommandTag)
+{
+    UE_LOG(LogTemp, Log, TEXT("RTSSelectionSubsystem: Command %s Issued to Current Selection."), *CommandTag.ToString());
+
+    // 1. 发送给选中的 Actor
+    for (AActor* Actor : SelectedActors)
+    {
+        if (Actor && Actor->Implements<URTSCommandInterface>())
+        {
+            IRTSCommandInterface::Execute_ExecuteCommand(Actor, CommandTag);
+        }
+    }
+
+    // 2. 核心补完：发送给选中的 Mass 实体 —— 解决“点击城市按钮无效/按钮显示默认”问题
+    // 在 Mass-centric 架构下，即便选中的是 Entity，也应将其关联的 Actor 作为中转执行命令
+    if (SelectedEntities.Num() > 0)
+    {
+        UMassEntitySubsystem* MassSubsystem = GetWorld()->GetSubsystem<UMassEntitySubsystem>();
+        ULandmarkSubsystem* LandmarkSub = GetWorld()->GetSubsystem<ULandmarkSubsystem>();
+        
+        if (MassSubsystem)
+        {
+            FMassEntityManager& EntityManager = MassSubsystem->GetMutableEntityManager();
+            
+            for (const FEntityHandle& Handle : SelectedEntities)
+            {
+                // 先检查 Index 有效性，避免 IsValidIndex(-1) 崩溃
+                if (Handle.Index <= 0) continue;
+                FMassEntityHandle NativeHandle(Handle.Index, Handle.Serial);
+                if (!EntityManager.IsEntityActive(NativeHandle)) continue;
+
+                AActor* CommandExecutor = nullptr;
+
+                // 尝试 A: 获取该实体的渲染 Actor (如果有的话，例如在高 LOD 模式下)
+                if (FRendering* RenderFrag = EntityManager.GetFragmentDataPtr<FRendering>(Handle))
+                {
+                    CommandExecutor = RenderFrag->BindingActorPtr.Get();
+                }
+
+                // 尝试 B: fallback - 新架构中 Command Grid 由 ULandmarkSettings 配置，
+                // 无需通过模板 Actor 分发，此路径暂留以备后续扩展
+                // if (!CommandExecutor && LandmarkSub)
+                // {
+                //     FString EntityType = LandmarkSub->FindTypeByEntity(Handle);
+                //     CommandExecutor = LandmarkSub->GetTemplateActorByType(EntityType); // 已废弃
+                // }
+
+                // 执行指令
+                if (CommandExecutor && CommandExecutor->Implements<URTSCommandInterface>())
+                {
+                    IRTSCommandInterface::Execute_ExecuteCommand(CommandExecutor, CommandTag);
+                }
+            }
+        }
+    }
+
+    RequestCommandRefresh();
+}
+
+AActor* URTSSelectionSubsystem::GetActiveActor() const
+{
+    if (SelectedActors.Num() == 0) return nullptr;
+    if (AvailableGroupKeys.IsValidIndex(CurrentGroupIndex))
+    {
+        const FString& ActiveKey = AvailableGroupKeys[CurrentGroupIndex];
+        for (AActor* Actor : SelectedActors)
+        {
+            if (Actor && Actor->GetClass()->GetDisplayNameText().ToString() == ActiveKey) return Actor;
+        }
+    }
+    return SelectedActors[0];
 }

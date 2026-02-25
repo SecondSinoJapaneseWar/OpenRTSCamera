@@ -6,8 +6,10 @@
 #include "Engine/Canvas.h"
 #include "LandmarkSubsystem.h"
 #include "LandmarkTypes.h"
-#include "Engine/Texture2D.h" // Added for FCanvasTextItem if needed, though GEngine->GetLargeFont() is used.
-#include "GameFramework/PlayerController.h" // Added for GetOwningPlayerController() if not already included implicitly.
+#include "Interfaces/RTSCommandInterface.h"
+#include "Data/RTSCommandGridAsset.h"
+#include "Engine/Texture2D.h"
+#include "GameFramework/PlayerController.h"
 
 // Constructor implementation: Initializes default values.
 ARTSHUD::ARTSHUD()
@@ -38,6 +40,7 @@ void ARTSHUD::DrawHUD()
 	if (bIsPerformingSelection)
 	{
 		PerformSelection();
+        bIsPerformingSelection = false; // CRITICAL: Reset the flag to stop continuous selection
 	}
 
 	// --- Landmark System Integration ---
@@ -149,78 +152,56 @@ void ARTSHUD::DrawSelectionBox_Implementation(const FVector2D& StartPoint, const
 // Default implementation of PerformSelection. Selects actors within the selection box.
 void ARTSHUD::PerformSelection_Implementation()
 {
-	// 1. Determine Selection Constraints & Modifier
-	bool bCanSelectActors = true;
-	bool bCanSelectMass = true;
+	// 1. Prepare
 	ERTSSelectionModifier Modifier = ERTSSelectionModifier::Replace;
+    float DragDistSq = FVector2D::DistSquared(SelectionStart, SelectionEnd);
 
 	URTSSelectionSubsystem* SelectionSubsystem = nullptr;
-	URTSSelector* SelectorComponent = nullptr;
-
-	APlayerController* PC = GetOwningPlayerController();
-	if (PC)
+    URTSSelector* SelectorComponent = nullptr;
+    APlayerController* PC = GetOwningPlayerController();
+	
+    if (PC)
 	{
-		// Find Components/Subsystems
-		SelectorComponent = PC->FindComponentByClass<URTSSelector>();
+        SelectorComponent = PC->FindComponentByClass<URTSSelector>();
 		if (const ULocalPlayer* LP = PC->GetLocalPlayer())
 		{
 			SelectionSubsystem = LP->GetSubsystem<URTSSelectionSubsystem>();
 		}
 
-		// Check Input Modifier (Shift = Add)
 		if (PC->IsInputKeyDown(EKeys::LeftShift) || PC->IsInputKeyDown(EKeys::RightShift))
 		{
 			Modifier = ERTSSelectionModifier::Add;
-
-			// "Type Consistency" Logic:
-			// If we are ADDING to selection, we restrict new selection to match existing type.
-			if (SelectionSubsystem)
-			{
-				if (SelectionSubsystem->HasSelectedActors())
-				{
-					bCanSelectMass = false; // Already have Actors -> Don't add Mass
-				}
-				else if (SelectionSubsystem->HasSelectedMass())
-				{
-					bCanSelectActors = false; // Already have Mass -> Don't add Actors
-				}
-			}
 		}
 	}
 
-	// 2. Perform Actor Selection (if allowed)
-	TArray<AActor*> FinalActorSelection;
-	
-	if (bCanSelectActors)
-	{
-		TArray<AActor*> RawActors;
-		GetActorsInSelectionRectangle<AActor>(SelectionStart, SelectionEnd, RawActors, false, false);
+    TArray<AActor*> FinalActorSelection;
+    TArray<FEntityHandle> FinalMassSelection;
 
-		// Filter for Selectable
-		for (AActor* Actor : RawActors)
-		{
-			if (Actor && Actor->FindComponentByClass<URTSSelectable>())
-			{
-				FinalActorSelection.Add(Actor);
-			}
-		}
-	}
+    // 2. SEARCH (Direct & Concurrent)
+    
+    // A. Actor Path (The primary way to select anything, including Cities now)
+    TArray<AActor*> RawActors;
+    GetActorsInSelectionRectangle<AActor>(SelectionStart, SelectionEnd, RawActors, false, false);
+    for (AActor* Actor : RawActors)
+    {
+        if (Actor && Actor->FindComponentByClass<URTSSelectable>())
+        {
+            FinalActorSelection.AddUnique(Actor);
+        }
+    }
 
-	// 3. Perform Mass Selection (Fallback logic: Only if No Actors found AND Mass is allowed)
-	TArray<FEntityHandle> FinalMassSelection;
-	bool bActorsFound = FinalActorSelection.Num() > 0;
+    // B. Entity Path (Soldiers - Mass Battle Standard)
+    PerformMassSelection(FinalMassSelection);
 
-	if (!bActorsFound && bCanSelectMass)
-	{
-		// Only attempt Mass select if we didn't Pick Actors (Priority) AND Mass is allowed (Consistency)
-		PerformMassSelection(FinalMassSelection);
-	}
+    // 3. APPLY
+    if (SelectionSubsystem)
+    {
+        SelectionSubsystem->SetSelectedUnits(FinalActorSelection, FinalMassSelection, Modifier);
+    }
 
-	// 4. Toggle Logic (Shift + Single Click = Deselect)
-	// 4. Toggle Logic (Shift + Single Click = Deselect)
+	// 5. Toggle Logic (Shift + Single Click = Deselect)
 	// ONLY apply toggle if this was a Click (not a Box Drag).
 	// Threshold: MinSelectionSizeSq (Synced with Visuals).
-	float DragDistSq = FVector2D::DistSquared(SelectionStart, SelectionEnd);
 	
 	if (Modifier == ERTSSelectionModifier::Add && SelectionSubsystem)
 	{
@@ -307,7 +288,7 @@ void ARTSHUD::PerformSelection_Implementation()
 	// Visual Highlighting (Actors)
 	if (SelectorComponent)
 	{
-		if (bActorsFound)
+		if (FinalActorSelection.Num() > 0)
 		{
 			UE_LOG(LogTemp, Log, TEXT("RTSHUD: Found %d Selectable Actors."), FinalActorSelection.Num());
 			SelectorComponent->HandleSelectedActors(FinalActorSelection);
@@ -324,11 +305,9 @@ void ARTSHUD::PerformSelection_Implementation()
 		}
 	}
 	
-	// Update Data Store
-	if (SelectionSubsystem)
-	{
-		SelectionSubsystem->SetSelectedUnits(FinalActorSelection, FinalMassSelection, Modifier);
-	}
+	// Update Data Store - REMOVED DUPLICATE CALL
+	// SetSelectedUnits was already called above after initial search.
+	// Logic now relies on that single entry point.
 
 	bIsPerformingSelection = false;
 }
@@ -344,21 +323,36 @@ void ARTSHUD::PerformMassSelection(TArray<FEntityHandle>& OutEntities)
 	if (!PC || !PC->PlayerCameraManager) return;
 
 	// Calculate selection box bounds
-	FVector2D Min(FMath::Min(SelectionStart.X, SelectionEnd.X), FMath::Min(SelectionStart.Y, SelectionEnd.Y));
-	FVector2D Max(FMath::Max(SelectionStart.X, SelectionEnd.X), FMath::Max(SelectionStart.Y, SelectionEnd.Y));
+	float MinX = FMath::Min(SelectionStart.X, SelectionEnd.X);
+    float MinY = FMath::Min(SelectionStart.Y, SelectionEnd.Y);
+    float MaxX = FMath::Max(SelectionStart.X, SelectionEnd.X);
+    float MaxY = FMath::Max(SelectionStart.Y, SelectionEnd.Y);
+    
+    float Width = MaxX - MinX;
+    float Height = MaxY - MinY;
+    float DragDistSq = Width * Width + Height * Height;
 
-	// Minimum selection size threshold
-	if (FVector2D::DistSquared(Min, Max) < 100.0f)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("RTSHUD: Selection box too small for Mass pick."));
-		return;
-	}
+    // --- 核心逻辑：统一平截头体选择 (Unified Frustum Selection) ---
+    // 无论是点选还是框选，都使用 ViewTraceForAgents 进行后端处理
+    bool bIsClick = (DragDistSq < MinSelectionSizeSq);
+    
+    if (bIsClick)
+    {
+        // 如果是点选，将单点向四周扩展 1 像素，形成一个微型 2x2 选区
+        // 这样可以确保平截头体法线非零，且能利用 Mass 优化的过滤逻辑
+        MinX -= 1.0f;
+        MaxX += 1.0f;
+        MinY -= 1.0f;
+        MaxY += 1.0f;
+    }
 
+	// 关键：逆时针排列（左上→左下→右下→右上）确保视锥体平面法线朝内
+	// 顺时针排列会使法线朝外，导致 PlaneDot 过滤掉框内所有实体
 	TArray<FVector2D> ScreenPoints = {
-		Min,
-		FVector2D(Max.X, Min.Y),
-		Max,
-		FVector2D(Min.X, Max.Y)
+		FVector2D(MinX, MinY),  // 左上
+		FVector2D(MinX, MaxY),  // 左下
+		FVector2D(MaxX, MaxY),  // 右下
+		FVector2D(MaxX, MinY),  // 右上
 	};
 
 	FViewTracePoints TracePoints;
@@ -369,37 +363,36 @@ void ARTSHUD::PerformMassSelection(TArray<FEntityHandle>& OutEntities)
 		FVector WorldPos, WorldDirection;
 		if (PC->DeprojectScreenPositionToWorld(ScreenPoint.X, ScreenPoint.Y, WorldPos, WorldDirection))
 		{
-			// Project points onto a plane at some distance to form the frustum
-			// Increased to 100,000 to ensure it covers the ground from typical RTS camera heights
 			TracePoints.SelectionPoints.Add(WorldPos + WorldDirection * 100000.0f);
 		}
 	}
-
-	UE_LOG(LogTemp, Log, TEXT("RTSHUD: Generated %d Selection Points for Mass Trace."), TracePoints.SelectionPoints.Num());
 
 	if (TracePoints.SelectionPoints.Num() == 4)
 	{
 		bool bHit = false;
 		TArray<FTraceResult> Results;
-		UMassBattleFuncLib::ViewTraceForAgents(this, bHit, Results, -1, TracePoints);
+        
+		int32 LocalKeepCount = bIsClick ? 1 : -1;
+		ESortMode SortMode = bIsClick ? ESortMode::NearToFar : ESortMode::None;
+
+#if WITH_EDITOR
+		FTraceDrawDebugConfig DebugCfg;
+		DebugCfg.bDrawDebugShape = true;
+		DebugCfg.Duration = 2.0f;
+		UMassBattleFuncLib::ViewTraceForAgents(this, bHit, Results, LocalKeepCount, TracePoints, false, FVector::ZeroVector, 1.0f, SortMode,
+			FVector::ZeroVector, FEntityArray(), FMassBattleQuery(), DebugCfg);
+#else
+		UMassBattleFuncLib::ViewTraceForAgents(this, bHit, Results, LocalKeepCount, TracePoints, false, FVector::ZeroVector, 1.0f, SortMode);
+#endif
+
+		UE_LOG(LogTemp, Warning, TEXT("PerformMassSelection: bHit=%d Results=%d IsClick=%d"), bHit ? 1:0, Results.Num(), bIsClick?1:0);
 
 		if (bHit)
 		{
-			UE_LOG(LogTemp, Log, TEXT("RTSHUD: Selected %d Mass Entities"), Results.Num());
 			for (const FTraceResult& Result : Results)
 			{
 				OutEntities.Add(Result.Entity);
-				// Log abbreviated
-				// UE_LOG(LogTemp, Log, TEXT("  - Entity Index: %d"), Result.Entity.Index);
 			}
 		}
-		else
-		{
-			UE_LOG(LogTemp, Warning, TEXT("RTSHUD: Mass Trace returned NO hits (bHit=false)."));
-		}
-	}
-	else
-	{
-		UE_LOG(LogTemp, Error, TEXT("RTSHUD: Failed to generate 4 world points for Mass Trace."));
 	}
 }
