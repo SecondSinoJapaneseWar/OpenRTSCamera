@@ -26,7 +26,9 @@ URTSCamera::URTSCamera()
 	this->FindGroundTraceLength = 100000;
 	this->MaximumZoomLength = 5000;
 	this->MinimumZoomLength = 500;
-	this->MoveSpeed = 50;
+	this->MaxMoveSpeed = 1024.0f;
+	this->MinMoveSpeed = 128.0f;
+	this->NowMoveSpeed = this->MinMoveSpeed;
 	this->RotateSpeed = 45;
 	this->StartingYAngle = -45.0f;
 	this->StartingZAngle = 0;
@@ -114,6 +116,12 @@ void URTSCamera::OnZoomCamera(const FInputActionValue& Value)
 		this->MinimumZoomLength,
 		this->MaximumZoomLength
 	);
+
+	// Calculate Alpha for Lerp (0 at min zoom, 1 at max zoom)
+	float Alpha = (this->DesiredZoomLength - this->MinimumZoomLength) / (this->MaximumZoomLength - this->MinimumZoomLength);
+	
+	// Lerp NowMoveSpeed between MinMoveSpeed and MaxMoveSpeed
+	this->NowMoveSpeed = FMath::Lerp(this->MinMoveSpeed, this->MaxMoveSpeed, Alpha);
 }
 
 void URTSCamera::OnRotateCamera(const FInputActionValue& Value)
@@ -228,7 +236,7 @@ void URTSCamera::ApplyMoveCameraCommands()
 	{
 		auto Movement = FVector2D(X, Y);
 		Movement.Normalize();
-		Movement *= this->MoveSpeed * Scale * this->DeltaSeconds;
+		Movement *= this->NowMoveSpeed * Scale * this->DeltaSeconds;
 		this->Root->SetWorldLocation(
 			this->Root->GetComponentLocation() + FVector(Movement.X, Movement.Y, 0.0f)
 		);
@@ -424,7 +432,7 @@ void URTSCamera::EdgeScrollLeft() const
 	const auto Movement = UKismetMathLibrary::FClamp(NormalizedMousePosition, 0.0, 1.0);
 
 	this->Root->AddRelativeLocation(
-		-1 * this->Root->GetRightVector() * Movement * this->EdgeScrollSpeed * this->DeltaSeconds
+		-1 * this->Root->GetRightVector() * Movement * this->NowMoveSpeed * this->DeltaSeconds
 	);
 }
 
@@ -440,7 +448,7 @@ void URTSCamera::EdgeScrollRight() const
 
 	const auto Movement = UKismetMathLibrary::FClamp(NormalizedMousePosition, 0.0, 1.0);
 	this->Root->AddRelativeLocation(
-		this->Root->GetRightVector() * Movement * this->EdgeScrollSpeed * this->DeltaSeconds
+		this->Root->GetRightVector() * Movement * this->NowMoveSpeed * this->DeltaSeconds
 	);
 }
 
@@ -456,7 +464,7 @@ void URTSCamera::EdgeScrollUp() const
 
 	const auto Movement = 1 - UKismetMathLibrary::FClamp(NormalizedMousePosition, 0.0, 1.0);
 	this->Root->AddRelativeLocation(
-		this->Root->GetForwardVector() * Movement * this->EdgeScrollSpeed * this->DeltaSeconds
+		this->Root->GetForwardVector() * Movement * this->NowMoveSpeed * this->DeltaSeconds
 	);
 }
 
@@ -472,7 +480,7 @@ void URTSCamera::EdgeScrollDown() const
 
 	const auto Movement = UKismetMathLibrary::FClamp(NormalizedMousePosition, 0.0, 1.0);
 	this->Root->AddRelativeLocation(
-		-1 * this->Root->GetForwardVector() * Movement * this->EdgeScrollSpeed * this->DeltaSeconds
+		-1 * this->Root->GetForwardVector() * Movement * this->NowMoveSpeed * this->DeltaSeconds
 	);
 }
 
